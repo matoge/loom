@@ -399,7 +399,7 @@ def generate_camera_image(preset):
         image = Image.new('RGB', (width, height), color=(135, 150, 165))  # Sky blue
         draw = ImageDraw.Draw(image)
         
-        if preset == "traffic_scene":
+        if preset == "traffic_scene" or preset == "urban_street" or preset == "parking_lot":
             # Sky gradient
             for y in range(height // 2):
                 color_val = int(135 + (y / (height // 2)) * 50)
@@ -417,37 +417,53 @@ def generate_camera_image(preset):
             
             # Traffic light pole and housing
             pole_x = width * 0.5
-            draw.rectangle([pole_x-5, height*0.5, pole_x+5, height*0.1], fill=(80, 80, 80))  # Pole
-            draw.rectangle([pole_x-25, height*0.1, pole_x+25, height*0.2], fill=(60, 60, 60))  # Housing
+            pole_top = int(height * 0.1)
+            pole_bottom = int(height * 0.5) 
+            draw.rectangle([pole_x-5, pole_top, pole_x+5, pole_bottom], fill=(80, 80, 80))  # Pole
+            draw.rectangle([pole_x-25, pole_top, pole_x+25, int(height*0.2)], fill=(60, 60, 60))  # Housing
             
-            # Traffic lights (red, yellow, green circles)
-            draw.ellipse([pole_x-20, height*0.11, pole_x-5, height*0.13], fill=(255, 50, 50))    # Red
-            draw.ellipse([pole_x-5, height*0.11, pole_x+10, height*0.13], fill=(255, 255, 100))  # Yellow  
-            draw.ellipse([pole_x+10, height*0.11, pole_x+25, height*0.13], fill=(100, 255, 100)) # Green
+            # Traffic lights (red, yellow, green circles) - fix coordinate order
+            light_top = int(height*0.11)
+            light_bottom = int(height*0.13)
+            draw.ellipse([pole_x-20, light_top, pole_x-5, light_bottom], fill=(255, 50, 50))    # Red
+            draw.ellipse([pole_x-5, light_top, pole_x+10, light_bottom], fill=(255, 255, 100))  # Yellow  
+            draw.ellipse([pole_x+10, light_top, pole_x+25, light_bottom], fill=(100, 255, 100)) # Green
             
             # Cars on road
             # Car 1 (left side)
-            car1_x = width * 0.25
-            draw.rectangle([car1_x, height*0.55, car1_x+80, height*0.68], fill=(150, 80, 80))    # Body
-            draw.rectangle([car1_x+10, height*0.52, car1_x+70, height*0.58], fill=(180, 180, 220))  # Windows
-            draw.ellipse([car1_x+5, height*0.65, car1_x+20, height*0.7], fill=(40, 40, 40))     # Wheel
-            draw.ellipse([car1_x+60, height*0.65, car1_x+75, height*0.7], fill=(40, 40, 40))    # Wheel
+            car1_x = int(width * 0.25)
+            car1_top = int(height*0.52)
+            car1_body_bottom = int(height*0.68)
+            car1_window_bottom = int(height*0.58)
+            car1_wheel_top = int(height*0.65)
+            car1_wheel_bottom = int(height*0.7)
+            
+            draw.rectangle([car1_x, car1_top+10, car1_x+80, car1_body_bottom], fill=(150, 80, 80))    # Body
+            draw.rectangle([car1_x+10, car1_top, car1_x+70, car1_window_bottom], fill=(180, 180, 220))  # Windows
+            draw.ellipse([car1_x+5, car1_wheel_top, car1_x+20, car1_wheel_bottom], fill=(40, 40, 40))     # Wheel
+            draw.ellipse([car1_x+60, car1_wheel_top, car1_x+75, car1_wheel_bottom], fill=(40, 40, 40))    # Wheel
             
             # Car 2 (right side, farther)
-            car2_x = width * 0.65
-            draw.rectangle([car2_x, height*0.58, car2_x+60, height*0.67], fill=(80, 120, 80))    # Body
-            draw.rectangle([car2_x+8, height*0.56, car2_x+52, height*0.6], fill=(180, 180, 220)) # Windows
-            draw.ellipse([car2_x+5, height*0.64, car2_x+15, height*0.68], fill=(40, 40, 40))     # Wheel
-            draw.ellipse([car2_x+45, height*0.64, car2_x+55, height*0.68], fill=(40, 40, 40))    # Wheel
+            car2_x = int(width * 0.65)
+            car2_top = int(height*0.56)
+            car2_body_bottom = int(height*0.67)
+            car2_window_bottom = int(height*0.6)
+            car2_wheel_top = int(height*0.64)
+            car2_wheel_bottom = int(height*0.68)
+            
+            draw.rectangle([car2_x, car2_top+5, car2_x+60, car2_body_bottom], fill=(80, 120, 80))    # Body
+            draw.rectangle([car2_x+8, car2_top, car2_x+52, car2_window_bottom], fill=(180, 180, 220)) # Windows
+            draw.ellipse([car2_x+5, car2_wheel_top, car2_x+15, car2_wheel_bottom], fill=(40, 40, 40))     # Wheel
+            draw.ellipse([car2_x+45, car2_wheel_top, car2_x+55, car2_wheel_bottom], fill=(40, 40, 40))    # Wheel
             
             # Distant buildings/structures
-            draw.rectangle([0, height*0.3, width*0.3, height*0.5], fill=(120, 120, 130))
-            draw.rectangle([width*0.7, height*0.25, width, height*0.5], fill=(110, 110, 125))
+            draw.rectangle([0, int(height*0.3), int(width*0.3), int(height*0.5)], fill=(120, 120, 130))
+            draw.rectangle([int(width*0.7), int(height*0.25), width, int(height*0.5)], fill=(110, 110, 125))
             
         else:
             # Default fallback scene
-            draw.rectangle([0, height*0.6, width, height], fill=(50, 50, 55))
-            draw.rectangle([width*0.4, height*0.4, width*0.6, height*0.6], fill=(100, 100, 120))
+            draw.rectangle([0, int(height*0.6), width, height], fill=(50, 50, 55))
+            draw.rectangle([int(width*0.4), int(height*0.4), int(width*0.6), int(height*0.6)], fill=(100, 100, 120))
         
         # Convert to base64 data URL
         buffer = io.BytesIO()

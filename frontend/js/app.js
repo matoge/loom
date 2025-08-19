@@ -34,13 +34,13 @@ class AnnotationApp {
         this.scene = new BABYLON.Scene(this.engine);
         this.scene.clearColor = new BABYLON.Color3(0.06, 0.08, 0.12);
         
-        // Camera aligned with ISO 8855 - looking towards +Z (which represents ISO +X forward)
+        // Camera aligned with ISO 8855 - looking towards +X forward
         this.camera = new BABYLON.ArcRotateCamera(
             'camera', 
-            0,           // Alpha: 0 = looking towards +Z (ISO +X forward)
-            Math.PI / 4, // Beta: 45° elevation angle (better view of frustum)
-            15,          // Closer radius to see frustum better
-            new BABYLON.Vector3(0, 0, 2), // Target the camera frustum area
+            -Math.PI / 2,  // Alpha: -90° = looking towards +X forward (ISO convention)
+            Math.PI / 4,   // Beta: 45° elevation angle (better view of frustum)
+            15,            // Closer radius to see frustum better
+            new BABYLON.Vector3(0, 0, 0), // Look at origin where axis display is
             this.scene
         );
         
@@ -258,6 +258,9 @@ class AnnotationApp {
         // Create image plane on far plane
         this.createFrustumImagePlane(farCorners);
         
+        // Store frustum reference for later updates
+        this.frustumMesh = frustum;
+        
         console.log('📹 Smaller camera frustum created with image plane');
     }
     
@@ -283,6 +286,9 @@ class AnnotationApp {
             
             imagePlane.material = imageMaterial;
             
+            // Store reference for later updates
+            this.imagePlane = imagePlane;
+            
             console.log('📸 Camera image plane created');
             
         } catch (error) {
@@ -290,10 +296,10 @@ class AnnotationApp {
         }
     }
     
-    async loadCameraImage(material) {
+    async loadCameraImage(material, preset = 'traffic_scene') {
         try {
             const apiBaseUrl = this.getApiBaseUrl();
-            const response = await fetch(`${apiBaseUrl}/api/camera/image/traffic_scene`);
+            const response = await fetch(`${apiBaseUrl}/api/camera/image/${preset}`);
             
             if (response.ok) {
                 const data = await response.json();
@@ -304,13 +310,20 @@ class AnnotationApp {
                 material.emissiveTexture = texture; // Make it glow slightly
                 material.emissiveColor = new BABYLON.Color3(0.3, 0.3, 0.3);
                 
-                console.log('✅ Camera image loaded and applied to frustum');
+                console.log(`✅ Camera image loaded and applied to frustum for preset: ${preset}`);
             } else {
                 console.error('❌ Failed to load camera image');
             }
             
         } catch (error) {
             console.error('❌ Error loading camera image:', error);
+        }
+    }
+    
+    async updateCameraImage(preset) {
+        // Find the image plane material and update it
+        if (this.imagePlane && this.imagePlane.material) {
+            await this.loadCameraImage(this.imagePlane.material, preset);
         }
     }
     
@@ -357,15 +370,15 @@ class AnnotationApp {
     }
     
     setupViewModeButtons() {
-        // 3D View
+        // 3D View - look at X forward
         const view3D = document.getElementById('view-3d');
         if (view3D) {
             view3D.addEventListener('click', () => {
-                this.camera.alpha = 0;
-                this.camera.beta = Math.PI / 4;
+                this.camera.alpha = -Math.PI / 2;  // Look towards +X forward
+                this.camera.beta = Math.PI / 4;    // 45° elevation
                 this.camera.radius = 15;
-                this.camera.setTarget(new BABYLON.Vector3(0, 0, 2));
-                console.log('📐 3D view activated');
+                this.camera.setTarget(BABYLON.Vector3.Zero());
+                console.log('📐 3D view activated - looking at X forward');
             });
         }
         
@@ -485,14 +498,20 @@ class AnnotationApp {
         const center = startPoint.add(endPoint).scale(0.5);
         const size = endPoint.subtract(startPoint);
         
+        // Ensure minimum size for visibility (typical car dimensions)
+        const minSize = 4.0; // 4 meters minimum 
+        const boxWidth = Math.max(Math.abs(size.x), minSize);
+        const boxDepth = Math.max(Math.abs(size.z), minSize);
+        const boxHeight = 1.8; // Typical car height
+        
         // Create wireframe box
         const box = BABYLON.MeshBuilder.CreateBox('annotationBox', {
-            width: Math.abs(size.x) || 2,
-            height: 2, // Default height
-            depth: Math.abs(size.z) || 2
+            width: boxWidth,
+            height: boxHeight,
+            depth: boxDepth
         }, this.scene);
         
-        box.position = new BABYLON.Vector3(center.x, 1, center.z); // 1m above ground
+        box.position = new BABYLON.Vector3(center.x, boxHeight/2, center.z); // Center vertically
         
         // Wireframe material
         const material = new BABYLON.StandardMaterial('boxMaterial', this.scene);
@@ -505,7 +524,12 @@ class AnnotationApp {
             type: 'annotation',
             label: document.getElementById('object-label').value || 'object',
             created: Date.now(),
-            id: `box_${this.annotationBoxes.length + 1}`
+            id: `box_${this.annotationBoxes.length + 1}`,
+            dimensions: {
+                width: boxWidth,
+                height: boxHeight,
+                depth: boxDepth
+            }
         };
         
         this.annotationBoxes.push(box);
@@ -630,6 +654,10 @@ class AnnotationApp {
             console.log('📊 Data received:', data.metadata);
             
             this.displayPoints(data.points);
+            
+            // Also update camera image with same preset
+            this.updateCameraImage(preset);
+            
             console.log(`✅ Successfully loaded ${preset} with ${data.points.length} points`);
             
         } catch (error) {
