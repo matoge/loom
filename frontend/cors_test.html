@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CORS Test</title>
+</head>
+<body>
+    <button id="testBtn">Test Generate Scene</button>
+    <div id="result"></div>
+    
+    <script>
+    document.getElementById('testBtn').addEventListener('click', async () => {
+        const result = document.getElementById('result');
+        result.innerHTML = 'Testing...';
+        
+        try {
+            console.log('Making request to: http://192.168.1.9:8001/api/pointcloud/generate');
+            
+            const response = await fetch('http://192.168.1.9:8001/api/pointcloud/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({preset: 'traffic_scene', num_points: 100})
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                result.innerHTML = `✅ SUCCESS! Generated ${data.points.length} points`;
+                console.log('Success:', data);
+            } else {
+                result.innerHTML = `❌ HTTP ${response.status}: ${response.statusText}`;
+            }
+            
+        } catch (error) {
+            result.innerHTML = `❌ Error: ${error.message}`;
+            console.error('CORS Error:', error);
+        }
+    });
+    </script>
+</body>
+</html>

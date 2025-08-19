@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 3D Annotation Studio</title>
+    
+    <!-- Babylon.js -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+    <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+    <script src="https://cdn.babylonjs.com/postProcessesLibrary/babylonjs.postProcess.min.js"></script>
+    
+    <!-- Modern UI Libraries -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Main Container -->
+    <div id="app-container">
+        <!-- Header Bar -->
+        <header id="header-bar">
+            <div class="logo">
+                <span class="logo-icon">🎯</span>
+                <span class="logo-text">3D Annotation Studio</span>
+            </div>
+            
+            <div class="header-controls">
+                <div class="preset-selector">
+                    <select id="preset-select">
+                        <option value="traffic_scene">🚦 Traffic Intersection</option>
+                        <option value="urban_street">🏙️ Urban Street</option>
+                        <option value="parking_lot">🅿️ Parking Lot</option>
+                    </select>
+                    <button id="load-preset" class="btn btn-primary">
+                        <i data-lucide="play"></i> Generate Scene
+                    </button>
+                </div>
+                
+                <div class="view-controls">
+                    <button id="view-3d" class="btn btn-view active">
+                        <i data-lucide="box"></i> 3D
+                    </button>
+                    <button id="view-top" class="btn btn-view">
+                        <i data-lucide="compass"></i> Top
+                    </button>
+                    <button id="view-2d" class="btn btn-view">
+                        <i data-lucide="image"></i> 2D
+                    </button>
+                    <button id="toggle-frustum" class="btn">
+                        <i data-lucide="video"></i> Camera
+                    </button>
+                </div>
+                
+                <div class="project-controls">
+                    <button id="save-project" class="btn btn-success">
+                        <i data-lucide="save"></i> Save
+                    </button>
+                    <button id="export-project" class="btn btn-secondary">
+                        <i data-lucide="download"></i> Export
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main id="main-content">
+            <!-- Sidebar Toolbar -->
+            <aside id="sidebar">
+                <div class="tool-section">
+                    <h3>🛠️ Tools</h3>
+                    <div class="tool-group">
+                        <button id="tool-select" class="tool-btn active" data-tool="select">
+                            <i data-lucide="mouse-pointer"></i>
+                            <span>Select</span>
+                        </button>
+                        <button id="tool-box" class="tool-btn" data-tool="box">
+                            <i data-lucide="square"></i>
+                            <span>Box</span>
+                        </button>
+                        <button id="tool-brush" class="tool-btn" data-tool="brush">
+                            <i data-lucide="paintbrush"></i>
+                            <span>Paint</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="properties-section">
+                    <h3>⚙️ Properties</h3>
+                    <div class="property-group">
+                        <label>Label</label>
+                        <input type="text" id="object-label" value="object" class="input">
+                        
+                        <label>Color</label>
+                        <div class="color-picker">
+                            <div class="color-option active" data-color="#ff6b35" style="background: #ff6b35"></div>
+                            <div class="color-option" data-color="#4ecdc4" style="background: #4ecdc4"></div>
+                            <div class="color-option" data-color="#45b7d1" style="background: #45b7d1"></div>
+                            <div class="color-option" data-color="#96ceb4" style="background: #96ceb4"></div>
+                            <div class="color-option" data-color="#ffeaa7" style="background: #ffeaa7"></div>
+                            <div class="color-option" data-color="#dda0dd" style="background: #dda0dd"></div>
+                        </div>
+                        
+                        <div class="dimension-controls">
+                            <label>Dimensions</label>
+                            <div class="input-row">
+                                <input type="number" id="dim-width" placeholder="W" step="0.1" value="2">
+                                <input type="number" id="dim-height" placeholder="H" step="0.1" value="2">
+                                <input type="number" id="dim-length" placeholder="L" step="0.1" value="2">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="stats-section">
+                    <h3>📊 Scene Stats</h3>
+                    <div class="stat-item">
+                        <span class="stat-label">Points</span>
+                        <span id="stat-points" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Objects</span>
+                        <span id="stat-objects" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Performance</span>
+                        <span id="stat-fps" class="stat-value">60 FPS</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- 3D Viewport -->
+            <div id="viewport-container">
+                <canvas id="babylon-canvas"></canvas>
+                
+                <!-- 2D Annotation Overlay -->
+                <div id="image-2d-container" class="hidden">
+                    <canvas id="image-2d-canvas"></canvas>
+                    <div id="image-controls">
+                        <button id="fit-image" class="btn btn-sm">
+                            <i data-lucide="maximize"></i> Fit
+                        </button>
+                        <button id="zoom-in" class="btn btn-sm">
+                            <i data-lucide="zoom-in"></i>
+                        </button>
+                        <button id="zoom-out" class="btn btn-sm">
+                            <i data-lucide="zoom-out"></i>
+                        </button>
+                        <span id="zoom-level">100%</span>
+                    </div>
+                </div>
+                
+                <!-- Loading Overlay - DISABLED -->
+                <div id="loading-overlay" style="display: none !important;">
+                    <div class="loading-content">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text">Generating awesome 3D scene...</div>
+                        <div class="loading-progress">
+                            <div id="loading-bar" class="loading-bar"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Visual Feedback Overlay -->
+                <div id="feedback-overlay">
+                    <div id="fps-counter">60 FPS</div>
+                    <div id="performance-indicator" class="perf-good">⚡</div>
+                </div>
+                
+                <!-- Instructions Overlay -->
+                <div id="instructions-overlay">
+                    <div class="instruction-card">
+                        <h4>🚀 Quick Start</h4>
+                        <ul>
+                            <li><strong>Generate Scene:</strong> Select a preset and click "Generate Scene"</li>
+                            <li><strong>Create Box:</strong> Select Box tool, click and drag</li>
+                            <li><strong>Edit Box:</strong> Select tool, click box, use handles</li>
+                            <li><strong>Paint Points:</strong> Use brush tool to classify points</li>
+                        </ul>
+                        <button id="hide-instructions" class="btn btn-sm">Got it!</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Object List Panel -->
+            <aside id="object-panel">
+                <div class="panel-header">
+                    <h3>📦 Objects</h3>
+                    <button id="clear-all" class="btn btn-sm btn-danger">
+                        <i data-lucide="trash-2"></i> Clear
+                    </button>
+                </div>
+                
+                <div id="object-list" class="object-list">
+                    <div class="empty-state">
+                        <i data-lucide="box" class="empty-icon"></i>
+                        <p>No objects yet</p>
+                        <p class="empty-hint">Use the Box tool to create annotations</p>
+                    </div>
+                </div>
+                
+                <div class="panel-footer">
+                    <div class="export-options">
+                        <button id="export-kitti" class="btn btn-sm">
+                            <i data-lucide="file-text"></i> KITTI
+                        </button>
+                        <button id="export-json" class="btn btn-sm">
+                            <i data-lucide="code"></i> JSON
+                        </button>
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container"></div>
+
+    <!-- Scripts -->
+    <script src="js/app.js"></script>
+    <script src="js/simple_fix.js"></script>
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+    </script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Version</title>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <style>
+        body { margin: 0; background: #1a1f2e; color: white; font-family: monospace; }
+        canvas { width: 70%; height: 100vh; float: left; }
+        #debug { width: 30%; height: 100vh; float: right; background: #000; padding: 10px; overflow-y: scroll; }
+        button { padding: 10px; margin: 5px; background: #ff6b35; color: white; border: none; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="debug">
+        <h3>Debug Log:</h3>
+        <div id="log"></div>
+        <button onclick="testAPI()">Test API</button>
+        <button onclick="loadPoints()">Load Points</button>
+        <button onclick="createFakePoints()">Create Fake Points</button>
+    </div>
+
+    <script>
+        function log(msg) {
+            const div = document.getElementById('log');
+            div.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            div.scrollTop = div.scrollHeight;
+            console.log(msg);
+        }
+
+        let scene, engine, camera;
+        
+        try {
+            log('Starting Babylon.js...');
+            const canvas = document.getElementById('canvas');
+            engine = new BABYLON.Engine(canvas, true);
+            scene = new BABYLON.Scene(engine);
+            scene.clearColor = new BABYLON.Color3(0.1, 0.1, 0.2);
+
+            camera = new BABYLON.ArcRotateCamera('camera', 0, Math.PI/3, 25, BABYLON.Vector3.Zero(), scene);
+            camera.attachControl(canvas, true);
+
+            new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), scene);
+
+            // Simple grid
+            const lines = [];
+            for (const r of [10, 20]) {
+                const points = [];
+                for (let i = 0; i <= 32; i++) {
+                    const a = (i / 32) * 2 * Math.PI;
+                    points.push(new BABYLON.Vector3(r * Math.cos(a), 0, r * Math.sin(a)));
+                }
+                lines.push(points);
+            }
+            
+            const grid = BABYLON.MeshBuilder.CreateLineSystem('grid', { lines }, scene);
+            grid.color = new BABYLON.Color3(0.5, 0.5, 0.5);
+
+            engine.runRenderLoop(() => scene.render());
+            window.addEventListener('resize', () => engine.resize());
+            
+            log('✅ Babylon.js initialized');
+
+        } catch (error) {
+            log('❌ Babylon.js error: ' + error.message);
+        }
+
+        async function testAPI() {
+            log('Testing API...');
+            try {
+                const controller = new AbortController();
+                setTimeout(() => controller.abort(), 5000); // 5 second timeout
+                
+                const response = await fetch('http://localhost:8001/api/pointcloud/presets', {
+                    signal: controller.signal
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ API working, got presets: ' + JSON.stringify(data.presets.map(p => p.name)));
+                } else {
+                    log('❌ API responded with status: ' + response.status);
+                }
+            } catch (error) {
+                log('❌ API error: ' + error.message);
+            }
+        }
+
+        async function loadPoints() {
+            log('Loading points from API...');
+            try {
+                const controller = new AbortController();
+                setTimeout(() => controller.abort(), 10000); // 10 second timeout
+                
+                const response = await fetch('http://localhost:8001/api/pointcloud/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ preset: 'traffic_scene', num_points: 500 }),
+                    signal: controller.signal
+                });
+
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                
+                const data = await response.json();
+                log('✅ Got data with ' + data.points.length + ' points');
+                
+                displayPoints(data.points);
+                
+            } catch (error) {
+                log('❌ Load error: ' + error.message);
+                log('Trying fake points instead...');
+                createFakePoints();
+            }
+        }
+
+        function createFakePoints() {
+            log('Creating fake points...');
+            const fakePoints = [];
+            
+            // Create some fake traffic scene points
+            for (let i = 0; i < 1000; i++) {
+                fakePoints.push([
+                    Math.random() * 20 - 10, // x
+                    Math.random() * 20 - 10, // y  
+                    Math.random() * 3,       // z
+                    Math.random()            // intensity
+                ]);
+            }
+            
+            log('✅ Created ' + fakePoints.length + ' fake points');
+            displayPoints(fakePoints);
+        }
+
+        function displayPoints(points) {
+            try {
+                log('Rendering ' + points.length + ' points...');
+                
+                const pcs = new BABYLON.PointsCloudSystem('pcs', 1, scene);
+                pcs.addPoints(points.length, (particle, i) => {
+                    const [x, y, z, intensity] = points[i];
+                    particle.position = new BABYLON.Vector3(-y, z, x); // ISO mapping
+                    particle.color = new BABYLON.Color4(intensity || 0.8, 0.6, 0.4, 1);
+                });
+
+                pcs.buildMeshAsync().then(() => {
+                    log('✅ Points rendered successfully');
+                }).catch(error => {
+                    log('❌ Render error: ' + error.message);
+                });
+
+            } catch (error) {
+                log('❌ Display error: ' + error.message);
+            }
+        }
+
+        // Auto-test on load
+        setTimeout(() => {
+            testAPI();
+            setTimeout(loadPoints, 2000);
+        }, 1000);
+    </script>
+</body>
+</html>

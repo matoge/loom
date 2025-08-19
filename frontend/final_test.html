@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head><title>Final CORS Test</title></head>
+<body>
+    <h2>3D Annotation Tool - CORS Test</h2>
+    <button id="generateBtn" style="padding:10px 20px; background:#ff6b35; color:white; border:none; border-radius:5px; cursor:pointer;">Generate Scene</button>
+    <div id="status" style="margin:20px 0; padding:10px; border-radius:5px;"></div>
+    <div id="details" style="font-family:monospace; font-size:12px;"></div>
+    
+    <script>
+    document.getElementById('generateBtn').addEventListener('click', async () => {
+        const status = document.getElementById('status');
+        const details = document.getElementById('details');
+        
+        status.style.background = '#ffa500';
+        status.innerHTML = 'Testing Generate Scene...';
+        details.innerHTML = '';
+        
+        try {
+            const response = await fetch('http://192.168.1.9:8001/api/pointcloud/generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    preset: 'traffic_scene',
+                    num_points: 1000
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                status.style.background = '#4ade80';
+                status.innerHTML = 'SUCCESS! Generate Scene working!';
+                details.innerHTML = 'Points: ' + (data.points ? data.points.length : 0) + ', Time: ' + (data.metadata ? data.metadata.generation_time_ms : 0) + 'ms';
+            } else {
+                throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+            }
+            
+        } catch (error) {
+            status.style.background = '#ef4444';
+            status.innerHTML = 'CORS Error: ' + error.message;
+            console.error('Error:', error);
+        }
+    });
+    </script>
+</body>
+</html>

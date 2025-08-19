@@ -1,0 +1,690 @@
+// Working 3D annotation app with ISO 8855 coordinate system
+class AnnotationApp {
+    constructor() {
+        this.canvas = document.getElementById('babylon-canvas');
+        this.engine = new BABYLON.Engine(this.canvas, true);
+        this.scene = null;
+        this.camera = null;
+        this.pointCloud = null;
+        this.init();
+    }
+    
+    init() {
+        console.log('🚀 Initializing Simple 3D Annotation Studio...');
+        this.createScene();
+        this.createSimpleGrid();
+        this.createAxisDisplay();
+        this.createCameraFrustum();
+        this.startRenderLoop();
+        this.setupUI();
+        this.hideInstructions();
+    }
+    
+    hideInstructions() {
+        // Auto-hide instructions after delay
+        setTimeout(() => {
+            const instructions = document.getElementById('instructions-overlay');
+            if (instructions) {
+                instructions.style.display = 'none';
+            }
+        }, 3000);
+    }
+    
+    createScene() {
+        this.scene = new BABYLON.Scene(this.engine);
+        this.scene.clearColor = new BABYLON.Color3(0.06, 0.08, 0.12);
+        
+        // Camera aligned with ISO 8855 - looking towards +Z (which represents ISO +X forward)
+        this.camera = new BABYLON.ArcRotateCamera(
+            'camera', 
+            0,           // Alpha: 0 = looking towards +Z (ISO +X forward)
+            Math.PI / 4, // Beta: 45° elevation angle (better view of frustum)
+            15,          // Closer radius to see frustum better
+            new BABYLON.Vector3(0, 0, 2), // Target the camera frustum area
+            this.scene
+        );
+        
+        this.camera.attachControl(this.canvas, true);
+        this.camera.wheelPrecision = 50;
+        
+        // Directional lighting - no visible light source
+        const light = new BABYLON.DirectionalLight('light', new BABYLON.Vector3(-1, -1, -1), this.scene);
+        light.intensity = 0.7;
+        
+        // Ground plane
+        const ground = BABYLON.MeshBuilder.CreateGround('ground', {width: 100, height: 100}, this.scene);
+        const groundMat = new BABYLON.StandardMaterial('groundMat', this.scene);
+        groundMat.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.15);
+        ground.material = groundMat;
+        ground.position.y = -0.1;
+    }
+    
+    createSimpleGrid() {
+        try {
+            const lines = [];
+            
+            // Concentric circles (distance rings)
+            const circles = [10, 20, 30, 50];
+            for (const radius of circles) {
+                const points = [];
+                const segments = 64;
+                
+                for (let i = 0; i <= segments; i++) {
+                    const angle = (i / segments) * 2 * Math.PI;
+                    points.push(new BABYLON.Vector3(
+                        radius * Math.cos(angle), // X (ISO -Y, right/left)
+                        0.05, // Slightly above ground
+                        radius * Math.sin(angle)  // Z (ISO +X, forward/backward)
+                    ));
+                }
+                lines.push(points);
+            }
+            
+            // Radial lines from center (like spokes)
+            const radialAngles = [0, 45, 90, 135, 180, 225, 270, 315];
+            const maxRadius = 50;
+            
+            for (const angleDeg of radialAngles) {
+                const angleRad = (angleDeg * Math.PI) / 180;
+                const radialLine = [
+                    new BABYLON.Vector3(0, 0.05, 0), // Center
+                    new BABYLON.Vector3(
+                        maxRadius * Math.cos(angleRad), // X direction
+                        0.05,
+                        maxRadius * Math.sin(angleRad)  // Z direction  
+                    )
+                ];
+                lines.push(radialLine);
+            }
+            
+            // Create the grid
+            const grid = BABYLON.MeshBuilder.CreateLineSystem('grid', { lines }, this.scene);
+            grid.color = new BABYLON.Color3(0.25, 0.35, 0.4);
+            grid.alpha = 0.7;
+            
+            // Add simple coordinate axes
+            this.createCoordinateAxes();
+            
+        } catch (error) {
+            console.error('Error creating grid:', error);
+        }
+    }
+    
+    createCoordinateAxes() {
+        // Simple colored coordinate axes
+        const axisLines = [
+            // Z-axis (forward/backward) - Red
+            {
+                line: [
+                    new BABYLON.Vector3(0, 0.1, -20),
+                    new BABYLON.Vector3(0, 0.1, 20)
+                ],
+                color: new BABYLON.Color3(1, 0.2, 0.2)
+            },
+            // X-axis (right/left) - Green
+            {
+                line: [
+                    new BABYLON.Vector3(-20, 0.1, 0),
+                    new BABYLON.Vector3(20, 0.1, 0)
+                ],
+                color: new BABYLON.Color3(0.2, 1, 0.2)
+            },
+            // Y-axis (up) - Blue
+            {
+                line: [
+                    new BABYLON.Vector3(0, 0, 0),
+                    new BABYLON.Vector3(0, 8, 0)
+                ],
+                color: new BABYLON.Color3(0.2, 0.2, 1)
+            }
+        ];
+        
+        for (const axis of axisLines) {
+            const axisLine = BABYLON.MeshBuilder.CreateLineSystem(
+                'axisLine',
+                { lines: [axis.line] },
+                this.scene
+            );
+            axisLine.color = axis.color;
+            axisLine.alpha = 0.8;
+        }
+    }
+    
+    createAxisDisplay() {
+        console.log('🧭 Creating simple axis display...');
+        
+        const axisLength = 5;
+        const origin = BABYLON.Vector3.Zero();
+        
+        try {
+            // Make thicker, more visible axis arrows using cylinders
+            
+            // X+ FORWARD axis (RED) - thick cylinder pointing toward camera
+            const xCylinder = BABYLON.MeshBuilder.CreateCylinder('xAxis', {
+                height: axisLength, 
+                diameter: 0.2
+            }, this.scene);
+            xCylinder.position = new BABYLON.Vector3(0, 0, axisLength/2);
+            xCylinder.rotation.x = Math.PI/2;
+            const xMat = new BABYLON.StandardMaterial('xMat', this.scene);
+            xMat.emissiveColor = new BABYLON.Color3(1, 0, 0);
+            xCylinder.material = xMat;
+            
+            // Y+ LEFT axis (GREEN) - thick cylinder pointing left
+            const yCylinder = BABYLON.MeshBuilder.CreateCylinder('yAxis', {
+                height: axisLength,
+                diameter: 0.2
+            }, this.scene);
+            yCylinder.position = new BABYLON.Vector3(-axisLength/2, 0, 0);
+            yCylinder.rotation.z = Math.PI/2;
+            const yMat = new BABYLON.StandardMaterial('yMat', this.scene);
+            yMat.emissiveColor = new BABYLON.Color3(0, 1, 0);
+            yCylinder.material = yMat;
+            
+            // Z+ UP axis (BLUE) - thick cylinder pointing up
+            const zCylinder = BABYLON.MeshBuilder.CreateCylinder('zAxis', {
+                height: axisLength,
+                diameter: 0.2
+            }, this.scene);
+            zCylinder.position = new BABYLON.Vector3(0, axisLength/2, 0);
+            const zMat = new BABYLON.StandardMaterial('zMat', this.scene);
+            zMat.emissiveColor = new BABYLON.Color3(0, 0, 1);
+            zCylinder.material = zMat;
+            
+            console.log('🔴 RED cylinder = X+ FORWARD');
+            console.log('🟢 GREEN cylinder = Y+ LEFT'); 
+            console.log('🔵 BLUE cylinder = Z+ UP');
+            
+        } catch (error) {
+            console.error('❌ Error creating axis display:', error);
+        }
+    }
+    
+    createCameraFrustum() {
+        // Smaller, more realistic camera frustum
+        const position = new BABYLON.Vector3(0, 1.5, 1); // Lower camera position
+        const fovH = Math.PI * 90 / 180; // 90° horizontal FOV (more realistic)
+        const fovV = Math.PI * 50 / 180; // 50° vertical FOV 
+        const nearDist = 0.3;
+        const farDist = 8; // Much smaller frustum
+        
+        // Create frustum wireframe pointing in +Z direction (ISO +X)
+        const frustumLines = [];
+        
+        // Near plane corners
+        const nearHW = Math.tan(fovH / 2) * nearDist;
+        const nearHH = Math.tan(fovV / 2) * nearDist;
+        const nearCorners = [
+            position.add(new BABYLON.Vector3(-nearHW, nearHH, nearDist)),  // Top-left
+            position.add(new BABYLON.Vector3(nearHW, nearHH, nearDist)),   // Top-right
+            position.add(new BABYLON.Vector3(nearHW, -nearHH, nearDist)),  // Bottom-right
+            position.add(new BABYLON.Vector3(-nearHW, -nearHH, nearDist)), // Bottom-left
+        ];
+        
+        // Far plane corners
+        const farHW = Math.tan(fovH / 2) * farDist;
+        const farHH = Math.tan(fovV / 2) * farDist;
+        const farCorners = [
+            position.add(new BABYLON.Vector3(-farHW, farHH, farDist)),   // Top-left
+            position.add(new BABYLON.Vector3(farHW, farHH, farDist)),    // Top-right
+            position.add(new BABYLON.Vector3(farHW, -farHH, farDist)),   // Bottom-right
+            position.add(new BABYLON.Vector3(-farHW, -farHH, farDist)),  // Bottom-left
+        ];
+        
+        // Near plane lines
+        for (let i = 0; i < 4; i++) {
+            frustumLines.push([nearCorners[i], nearCorners[(i + 1) % 4]]);
+        }
+        
+        // Far plane lines  
+        for (let i = 0; i < 4; i++) {
+            frustumLines.push([farCorners[i], farCorners[(i + 1) % 4]]);
+        }
+        
+        // Connection lines from near to far
+        for (let i = 0; i < 4; i++) {
+            frustumLines.push([nearCorners[i], farCorners[i]]);
+        }
+        
+        // Create line system
+        const frustum = BABYLON.MeshBuilder.CreateLineSystem('frustum', {
+            lines: frustumLines
+        }, this.scene);
+        
+        const frustumMaterial = new BABYLON.StandardMaterial('frustumMat', this.scene);
+        frustumMaterial.emissiveColor = new BABYLON.Color3(0, 1, 1); // Cyan color
+        frustum.material = frustumMaterial;
+        
+        // Create image plane on far plane
+        this.createFrustumImagePlane(farCorners);
+        
+        console.log('📹 Smaller camera frustum created with image plane');
+    }
+    
+    createFrustumImagePlane(farCorners) {
+        try {
+            // Create a plane mesh for the far plane
+            const imagePlane = BABYLON.MeshBuilder.CreatePlane('imagePlane', {
+                width: Math.abs(farCorners[1].x - farCorners[0].x), // Width from corners
+                height: Math.abs(farCorners[0].y - farCorners[3].y)  // Height from corners
+            }, this.scene);
+            
+            // Position at center of far plane
+            const centerX = (farCorners[0].x + farCorners[1].x) / 2;
+            const centerY = (farCorners[0].y + farCorners[3].y) / 2;
+            const centerZ = farCorners[0].z;
+            imagePlane.position = new BABYLON.Vector3(centerX, centerY, centerZ);
+            
+            // Create material for camera image
+            const imageMaterial = new BABYLON.StandardMaterial('imageMat', this.scene);
+            
+            // Load image from server
+            this.loadCameraImage(imageMaterial);
+            
+            imagePlane.material = imageMaterial;
+            
+            console.log('📸 Camera image plane created');
+            
+        } catch (error) {
+            console.error('❌ Error creating image plane:', error);
+        }
+    }
+    
+    async loadCameraImage(material) {
+        try {
+            const apiBaseUrl = this.getApiBaseUrl();
+            const response = await fetch(`${apiBaseUrl}/api/camera/image/traffic_scene`);
+            
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Create texture from base64 image data
+                const texture = new BABYLON.Texture(data.image_data, this.scene);
+                material.diffuseTexture = texture;
+                material.emissiveTexture = texture; // Make it glow slightly
+                material.emissiveColor = new BABYLON.Color3(0.3, 0.3, 0.3);
+                
+                console.log('✅ Camera image loaded and applied to frustum');
+            } else {
+                console.error('❌ Failed to load camera image');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error loading camera image:', error);
+        }
+    }
+    
+    startRenderLoop() {
+        this.engine.runRenderLoop(() => this.scene.render());
+        window.addEventListener('resize', () => this.engine.resize());
+    }
+    
+    setupUI() {
+        console.log('🔧 Setting up UI...');
+        
+        // Connect to existing UI elements
+        const loadButton = document.getElementById('load-preset');
+        console.log('Load button found:', !!loadButton);
+        
+        if (loadButton) {
+            loadButton.addEventListener('click', (e) => {
+                console.log('🎯 Generate Scene button clicked!');
+                e.preventDefault();
+                this.loadSelectedPreset();
+            });
+        } else {
+            console.warn('❌ Load preset button not found');
+        }
+        
+        // Setup view mode buttons
+        this.setupViewModeButtons();
+        
+        // Setup annotation tools
+        this.setupAnnotationTools();
+        
+        // Hide instructions button
+        const hideInstructionsBtn = document.getElementById('hide-instructions');
+        if (hideInstructionsBtn) {
+            hideInstructionsBtn.addEventListener('click', () => {
+                const instructions = document.getElementById('instructions-overlay');
+                if (instructions) {
+                    instructions.style.display = 'none';
+                }
+            });
+        }
+        
+        console.log('✅ UI setup complete');
+    }
+    
+    setupViewModeButtons() {
+        // 3D View
+        const view3D = document.getElementById('view-3d');
+        if (view3D) {
+            view3D.addEventListener('click', () => {
+                this.camera.alpha = 0;
+                this.camera.beta = Math.PI / 4;
+                this.camera.radius = 15;
+                this.camera.setTarget(new BABYLON.Vector3(0, 0, 2));
+                console.log('📐 3D view activated');
+            });
+        }
+        
+        // Top View  
+        const viewTop = document.getElementById('view-top');
+        if (viewTop) {
+            viewTop.addEventListener('click', () => {
+                this.camera.alpha = 0;
+                this.camera.beta = 0.1; // Almost top-down
+                this.camera.radius = 20;
+                this.camera.setTarget(BABYLON.Vector3.Zero());
+                console.log('🔝 Top view activated');
+            });
+        }
+        
+        // 2D View (show image container)
+        const view2D = document.getElementById('view-2d');
+        if (view2D) {
+            view2D.addEventListener('click', () => {
+                const imageContainer = document.getElementById('image-2d-container');
+                if (imageContainer) {
+                    imageContainer.classList.toggle('hidden');
+                    console.log('🖼️ 2D view toggled');
+                }
+            });
+        }
+        
+        // Camera Frustum Toggle
+        const toggleFrustum = document.getElementById('toggle-frustum');
+        if (toggleFrustum) {
+            toggleFrustum.addEventListener('click', () => {
+                console.log('📹 Camera frustum toggle (already visible)');
+            });
+        }
+    }
+    
+    setupAnnotationTools() {
+        this.annotationBoxes = [];
+        this.currentTool = 'select';
+        
+        // Select Tool
+        const selectTool = document.getElementById('tool-select');
+        if (selectTool) {
+            selectTool.addEventListener('click', () => {
+                this.currentTool = 'select';
+                this.updateToolSelection();
+                console.log('🖱️ Select tool activated');
+            });
+        }
+        
+        // Box Tool
+        const boxTool = document.getElementById('tool-box');
+        if (boxTool) {
+            boxTool.addEventListener('click', () => {
+                this.currentTool = 'box';
+                this.updateToolSelection();
+                console.log('📦 Box tool activated');
+            });
+        }
+        
+        // Setup 3D interaction for box creation
+        this.setupBoxCreation();
+    }
+    
+    updateToolSelection() {
+        // Update UI to show active tool
+        document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+        const activeBtn = document.getElementById(`tool-${this.currentTool}`);
+        if (activeBtn) activeBtn.classList.add('active');
+    }
+    
+    setupBoxCreation() {
+        let startPoint = null;
+        let isCreating = false;
+        
+        this.scene.onPointerObservable.add((pointerInfo) => {
+            if (this.currentTool !== 'box') return;
+            
+            switch (pointerInfo.type) {
+                case BABYLON.PointerEventTypes.POINTERDOWN:
+                    if (pointerInfo.event.button === 0) {
+                        const pickResult = this.scene.pick(
+                            this.scene.pointerX,
+                            this.scene.pointerY,
+                            (mesh) => mesh.name === 'ground'
+                        );
+                        
+                        if (pickResult.hit) {
+                            startPoint = pickResult.pickedPoint;
+                            isCreating = true;
+                            console.log('📦 Starting box creation at:', startPoint);
+                        }
+                    }
+                    break;
+                    
+                case BABYLON.PointerEventTypes.POINTERUP:
+                    if (isCreating && startPoint) {
+                        const pickResult = this.scene.pick(
+                            this.scene.pointerX,
+                            this.scene.pointerY,
+                            (mesh) => mesh.name === 'ground'
+                        );
+                        
+                        if (pickResult.hit) {
+                            this.createAnnotationBox(startPoint, pickResult.pickedPoint);
+                        }
+                        
+                        startPoint = null;
+                        isCreating = false;
+                    }
+                    break;
+            }
+        });
+    }
+    
+    createAnnotationBox(startPoint, endPoint) {
+        const center = startPoint.add(endPoint).scale(0.5);
+        const size = endPoint.subtract(startPoint);
+        
+        // Create wireframe box
+        const box = BABYLON.MeshBuilder.CreateBox('annotationBox', {
+            width: Math.abs(size.x) || 2,
+            height: 2, // Default height
+            depth: Math.abs(size.z) || 2
+        }, this.scene);
+        
+        box.position = new BABYLON.Vector3(center.x, 1, center.z); // 1m above ground
+        
+        // Wireframe material
+        const material = new BABYLON.StandardMaterial('boxMaterial', this.scene);
+        material.wireframe = true;
+        material.emissiveColor = new BABYLON.Color3(1, 0.5, 0); // Orange
+        box.material = material;
+        
+        // Store annotation data
+        box.metadata = {
+            type: 'annotation',
+            label: document.getElementById('object-label').value || 'object',
+            created: Date.now(),
+            id: `box_${this.annotationBoxes.length + 1}`
+        };
+        
+        this.annotationBoxes.push(box);
+        this.updateObjectsList();
+        
+        console.log('✅ Created annotation box:', box.metadata);
+    }
+    
+    updateObjectsList() {
+        const objectList = document.getElementById('object-list');
+        const statObjects = document.getElementById('stat-objects');
+        
+        if (this.annotationBoxes.length === 0) {
+            if (objectList) {
+                objectList.innerHTML = `
+                    <div class="empty-state">
+                        <i data-lucide="box" class="empty-icon"></i>
+                        <p>No objects yet</p>
+                        <p class="empty-hint">Use the Box tool to create annotations</p>
+                    </div>`;
+            }
+        } else {
+            if (objectList) {
+                objectList.innerHTML = this.annotationBoxes.map(box => `
+                    <div class="object-item">
+                        <span>${box.metadata.id}: ${box.metadata.label}</span>
+                        <button onclick="app.deleteBox('${box.metadata.id}')" class="btn btn-sm btn-danger">×</button>
+                    </div>
+                `).join('');
+            }
+        }
+        
+        if (statObjects) {
+            statObjects.textContent = this.annotationBoxes.length;
+        }
+    }
+    
+    deleteBox(boxId) {
+        const boxIndex = this.annotationBoxes.findIndex(box => box.metadata.id === boxId);
+        if (boxIndex >= 0) {
+            this.annotationBoxes[boxIndex].dispose();
+            this.annotationBoxes.splice(boxIndex, 1);
+            this.updateObjectsList();
+            console.log('🗑️ Deleted box:', boxId);
+        }
+    }
+    
+    async loadPresets() {
+        try {
+            // Use the server's IP for remote browser access
+            const apiBaseUrl = this.getApiBaseUrl();
+            const response = await fetch(`${apiBaseUrl}/api/pointcloud/presets`);
+            if (!response.ok) throw new Error('Failed to fetch presets');
+            
+            const data = await response.json();
+            
+            const select = document.getElementById('preset-select');
+            if (select) {
+                select.innerHTML = '';
+                data.presets.forEach(preset => {
+                    const option = document.createElement('option');
+                    option.value = preset.id;
+                    option.textContent = preset.name;
+                    select.appendChild(option);
+                });
+                console.log('✅ Presets loaded successfully');
+            }
+        } catch (error) {
+            console.error('❌ Failed to load presets:', error);
+            // Add fallback preset
+            const select = document.getElementById('preset-select');
+            if (select) {
+                select.innerHTML = '<option value="traffic_scene">🚦 Traffic Scene</option>';
+            }
+        }
+    }
+    
+    getApiBaseUrl() {
+        // Check if we're running on localhost or remote server
+        const hostname = window.location.hostname;
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            return 'http://localhost:8001';
+        } else {
+            // For remote access, use the server's actual IP
+            return 'http://192.168.1.9:8001';
+        }
+    }
+    
+    async loadSelectedPreset() {
+        const select = document.getElementById('preset-select');
+        const preset = select ? select.value : 'traffic_scene';
+        
+        console.log(`🚀 Loading preset: ${preset}...`);
+        
+        try {
+            const apiBaseUrl = this.getApiBaseUrl();
+            console.log(`📡 API Base URL: ${apiBaseUrl}`);
+            
+            const url = `${apiBaseUrl}/api/pointcloud/generate`;
+            console.log(`📞 Making request to: ${url}`);
+            
+            const requestBody = {
+                preset: preset,
+                num_points: 8000
+            };
+            console.log('📦 Request body:', requestBody);
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(requestBody)
+            });
+            
+            console.log('📨 Response status:', response.status, response.statusText);
+            console.log('🔗 CORS headers:', response.headers.get('access-control-allow-origin'));
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            console.log('📊 Data received:', data.metadata);
+            
+            this.displayPoints(data.points);
+            console.log(`✅ Successfully loaded ${preset} with ${data.points.length} points`);
+            
+        } catch (error) {
+            console.error('❌ CORS/Network Error:', error.name, error.message);
+            alert('Generate Scene failed: ' + error.message);
+        }
+    }
+    
+    displayPoints(points) {
+        // Remove existing point cloud
+        if (this.pointCloud) {
+            this.pointCloud.dispose();
+        }
+        
+        const pcs = new BABYLON.PointsCloudSystem('pcs', 1, this.scene);
+        
+        pcs.addPoints(points.length, (particle, i) => {
+            const point = points[i];
+            
+            // Points come as [x, y, z, intensity] from backend
+            // ISO 8855: x=forward, y=left, z=up
+            // Our camera system: x=right, y=up, z=forward  
+            // Mapping: ISO_x -> Babylon_z, ISO_y -> -Babylon_x, ISO_z -> Babylon_y
+            particle.position = new BABYLON.Vector3(
+                -point[1],  // ISO y (left) -> Babylon -x (screen left)
+                point[2],   // ISO z (up) -> Babylon y (screen up)
+                point[0]    // ISO x (forward) -> Babylon z (screen forward)
+            );
+            
+            // Color by intensity
+            const intensity = point[3] || 0.5;
+            particle.color = new BABYLON.Color4(
+                intensity, 
+                intensity * 0.8, 
+                intensity * 0.6, 
+                1
+            );
+        });
+        
+        pcs.buildMeshAsync().then(() => {
+            this.pointCloud = pcs.mesh;
+            
+            // Make points thicker/more visible
+            if (this.pointCloud.material) {
+                this.pointCloud.material.pointSize = 4.0; // Increase from default 1.0
+            }
+            
+            console.log('✅ Point cloud rendered successfully');
+        }).catch(error => {
+            console.error('❌ Failed to render point cloud:', error);
+        });
+    }
+}
+
+// Initialize the app when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    window.annotationApp = new AnnotationApp();
+});

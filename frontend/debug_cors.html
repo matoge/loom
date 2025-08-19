@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CORS Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #0f1223; color: white; }
+        button { padding: 15px 30px; background: #ff6b35; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; }
+        .result { margin: 20px 0; padding: 15px; border-radius: 5px; }
+        .success { background: rgba(74, 222, 128, 0.2); border: 1px solid #4ade80; }
+        .error { background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; }
+        .info { background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; }
+        pre { font-size: 12px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🎯 CORS Debug Test for Generate Scene</h1>
+    <p>Testing the exact same request that the main app makes.</p>
+    
+    <button onclick="testGenerateScene()">🚀 Test Generate Scene</button>
+    
+    <div id="results"></div>
+    
+    <script>
+    const resultsDiv = document.getElementById('results');
+    
+    function log(message, type = 'info') {
+        const div = document.createElement('div');
+        div.className = `result ${type}`;
+        div.innerHTML = message;
+        resultsDiv.appendChild(div);
+        console.log(message);
+    }
+    
+    // Simulate exact same code as main app
+    function getApiBaseUrl() {
+        const hostname = window.location.hostname;
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            return 'http://localhost:8001';
+        } else {
+            return 'http://192.168.1.9:8001';
+        }
+    }
+    
+    async function testGenerateScene() {
+        resultsDiv.innerHTML = '';
+        log('🔄 Starting Generate Scene test...', 'info');
+        
+        try {
+            const apiBaseUrl = getApiBaseUrl();
+            log(`📡 API Base URL: ${apiBaseUrl}`, 'info');
+            
+            const url = \`\${apiBaseUrl}/api/pointcloud/generate\`;
+            log(`📞 Request URL: ${url}`, 'info');
+            
+            const requestBody = {
+                preset: 'traffic_scene',
+                num_points: 1000
+            };
+            log(`📦 Request body: <pre>${JSON.stringify(requestBody, null, 2)}</pre>`, 'info');
+            
+            log('🌐 Making fetch request...', 'info');
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(requestBody)
+            });
+            
+            log(`📨 Response status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+            log(`🔗 CORS Allow-Origin: ${response.headers.get('access-control-allow-origin') || 'NOT SET'}`, 'info');
+            
+            if (response.ok) {
+                const data = await response.json();
+                log(`✅ SUCCESS! Generated ${data.points ? data.points.length : 0} points in ${data.metadata ? data.metadata.generation_time_ms : 0}ms`, 'success');
+                log(`📊 Metadata: <pre>${JSON.stringify(data.metadata, null, 2)}</pre>`, 'success');
+            } else {
+                log(`❌ HTTP Error: ${response.status} ${response.statusText}`, 'error');
+            }
+            
+        } catch (error) {
+            log(`❌ JavaScript Error: ${error.name} - ${error.message}`, 'error');
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                log('💡 This is likely a CORS error. Check browser network tab for details.', 'error');
+            }
+        }
+    }
+    
+    // Auto-run test on page load
+    window.onload = () => {
+        log('✅ Page loaded successfully', 'success');
+        log('🔧 Ready to test - click the button above', 'info');
+    };
+    </script>
+</body>
+</html>

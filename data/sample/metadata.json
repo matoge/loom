@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "generator": "High-Performance Sample Generator",
+  "formats": [
+    "parquet",
+    "ply",
+    "json"
+  ],
+  "presets": [
+    {
+      "id": "traffic_scene",
+      "name": "\ud83d\udea6 Traffic Intersection",
+      "description": "Realistic intersection with traffic lights and vehicles",
+      "files": {
+        "parquet": "traffic_scene.parquet",
+        "ply": "traffic_scene.ply",
+        "json": "traffic_scene.json"
+      }
+    },
+    {
+      "id": "urban_street",
+      "name": "\ud83c\udfd9\ufe0f Urban Street",
+      "description": "City street with buildings and infrastructure",
+      "files": {
+        "parquet": "urban_street.parquet",
+        "ply": "urban_street.ply",
+        "json": "urban_street.json"
+      }
+    },
+    {
+      "id": "parking_lot",
+      "name": "\ud83c\udd7f\ufe0f Parking Lot",
+      "description": "Shopping mall parking with organized vehicles",
+      "files": {
+        "parquet": "parking_lot.parquet",
+        "ply": "parking_lot.ply",
+        "json": "parking_lot.json"
+      }
+    }
+  ],
+  "usage": {
+    "parquet": "Fastest loading, use for production",
+    "ply": "Standard format, good for visualization tools",
+    "json": "Human readable, includes full metadata"
+  }
+}
