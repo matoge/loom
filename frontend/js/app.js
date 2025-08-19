@@ -353,42 +353,120 @@ class AnnotationApp {
             return;
         }
         
-        // Create or toggle a full-screen 2D camera overlay
-        let overlay = document.getElementById('camera-2d-overlay');
+        // Create or toggle the 2D annotation sub-window
+        let subWindow = document.getElementById('camera-2d-window');
         
-        if (!overlay) {
-            overlay = this.create2DAnnotationOverlay();
+        if (!subWindow) {
+            subWindow = this.create2DAnnotationWindow();
         } else {
             // Toggle visibility
-            overlay.style.display = overlay.style.display === 'none' ? 'flex' : 'none';
+            const isVisible = subWindow.style.display !== 'none';
+            subWindow.style.display = isVisible ? 'none' : 'block';
+            console.log(`📐 2D annotation window ${isVisible ? 'hidden' : 'shown'}`);
         }
     }
     
-    create2DAnnotationOverlay() {
-        // Create the full-screen 2D annotation overlay
-        const overlay = document.createElement('div');
-        overlay.id = 'camera-2d-overlay';
-        overlay.style.cssText = `
+    create2DAnnotationWindow() {
+        // Create a professional 2D annotation sub-window (bottom-right)
+        const subWindow = document.createElement('div');
+        subWindow.id = 'camera-2d-window';
+        subWindow.style.cssText = `
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.95);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+            bottom: 20px;
+            right: 20px;
+            width: 480px;
+            height: 360px;
+            background: rgba(20, 25, 35, 0.95);
+            border: 2px solid #00ffff;
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 255, 255, 0.3);
+            backdrop-filter: blur(10px);
+            display: block;
             z-index: 1000;
+            resize: both;
+            overflow: hidden;
+            min-width: 320px;
+            min-height: 240px;
         `;
         
-        // Create container for image and annotations
+        // Title bar with controls
+        const titleBar = document.createElement('div');
+        titleBar.style.cssText = `
+            background: linear-gradient(90deg, #00ffff22, #0066ff22);
+            padding: 8px 12px;
+            border-bottom: 1px solid #00ffff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: move;
+            user-select: none;
+        `;
+        
+        const titleText = document.createElement('span');
+        titleText.textContent = `📐 2D Camera View (${this.currentSceneData.preset})`;
+        titleText.style.cssText = `
+            color: #00ffff;
+            font-weight: bold;
+            flex: 1;
+            font-size: 14px;
+        `;
+        
+        // Controls section
+        const controls = document.createElement('div');
+        controls.style.cssText = `
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        `;
+        
+        // Point cloud overlay toggle
+        const pcOverlayBtn = document.createElement('button');
+        pcOverlayBtn.textContent = '🔴 PC';
+        pcOverlayBtn.title = 'Toggle Point Cloud Overlay';
+        pcOverlayBtn.style.cssText = `
+            padding: 4px 8px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #666;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        `;
+        pcOverlayBtn.onclick = () => this.togglePointCloudOverlay();
+        
+        // Box count
+        const boxCountText = document.createElement('span');
+        boxCountText.id = '2d-box-count-window';
+        boxCountText.textContent = '0';
+        boxCountText.style.cssText = `
+            color: #00ffff;
+            font-size: 11px;
+            padding: 2px 6px;
+            background: rgba(0, 255, 255, 0.2);
+            border-radius: 10px;
+        `;
+        
+        // Close button
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = '×';
+        closeBtn.style.cssText = `
+            padding: 2px 8px;
+            background: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+        `;
+        closeBtn.onclick = () => subWindow.style.display = 'none';
+        
+        // Image container
         const imageContainer = document.createElement('div');
         imageContainer.style.cssText = `
             position: relative;
-            max-width: 90%;
-            max-height: 80%;
-            border: 2px solid #00ffff;
+            width: 100%;
+            height: calc(100% - 40px);
             overflow: hidden;
         `;
         
@@ -396,12 +474,14 @@ class AnnotationApp {
         const img = document.createElement('img');
         img.style.cssText = `
             width: 100%;
-            height: auto;
+            height: 100%;
+            object-fit: contain;
             display: block;
+            background: #111;
         `;
         img.src = this.currentSceneData.camera_image.image_data;
         
-        // SVG overlay for drawing 2D bounding boxes
+        // SVG overlay for 2D annotations
         const svgOverlay = document.createElement('svg');
         svgOverlay.style.cssText = `
             position: absolute;
@@ -413,78 +493,47 @@ class AnnotationApp {
             cursor: crosshair;
         `;
         
-        // Control bar
-        const controlBar = document.createElement('div');
-        controlBar.style.cssText = `
+        // Canvas for point cloud overlay (initially hidden)
+        const pcCanvas = document.createElement('canvas');
+        pcCanvas.id = 'pc-overlay-canvas';
+        pcCanvas.style.cssText = `
             position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 10px;
-            border-radius: 5px;
-            color: white;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: none;
         `;
-        
-        const modeText = document.createElement('span');
-        modeText.textContent = `2D Annotation Mode (${this.currentSceneData.preset}) - Click & drag to draw boxes`;
-        modeText.style.marginRight = '15px';
-        
-        const boxCountText = document.createElement('span');
-        boxCountText.id = '2d-box-count';
-        boxCountText.textContent = '0 boxes';
-        boxCountText.style.cssText = `
-            margin-right: 15px;
-            padding: 4px 8px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 3px;
-        `;
-        
-        const backTo3DBtn = document.createElement('button');
-        backTo3DBtn.textContent = '← Back to 3D';
-        backTo3DBtn.style.cssText = `
-            padding: 8px 15px;
-            background: #00aa00;
-            color: white;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-            margin-right: 10px;
-        `;
-        backTo3DBtn.onclick = () => overlay.style.display = 'none';
-        
-        const closeBtn = document.createElement('button');
-        closeBtn.textContent = '✕ Close';
-        closeBtn.style.cssText = `
-            padding: 8px 15px;
-            background: #ff4444;
-            color: white;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-        `;
-        closeBtn.onclick = () => overlay.style.display = 'none';
         
         // Setup 2D box drawing
-        this.setup2DBoxDrawing(svgOverlay, img);
+        this.setup2DBoxDrawingWindow(svgOverlay, img);
         
-        // Assemble overlay
-        controlBar.appendChild(modeText);
-        controlBar.appendChild(boxCountText);
-        controlBar.appendChild(backTo3DBtn);
-        controlBar.appendChild(closeBtn);
+        // Make draggable
+        this.makeDraggable(subWindow, titleBar);
+        
+        // Assemble components
+        controls.appendChild(pcOverlayBtn);
+        controls.appendChild(boxCountText);
+        controls.appendChild(closeBtn);
+        
+        titleBar.appendChild(titleText);
+        titleBar.appendChild(controls);
         
         imageContainer.appendChild(img);
+        imageContainer.appendChild(pcCanvas);
         imageContainer.appendChild(svgOverlay);
-        overlay.appendChild(controlBar);
-        overlay.appendChild(imageContainer);
         
-        document.body.appendChild(overlay);
+        subWindow.appendChild(titleBar);
+        subWindow.appendChild(imageContainer);
         
-        console.log('📐 2D annotation overlay created');
-        return overlay;
+        document.body.appendChild(subWindow);
+        
+        console.log('📐 Professional 2D annotation sub-window created');
+        return subWindow;
     }
     
-    setup2DBoxDrawing(svgOverlay, imageElement) {
+    setup2DBoxDrawingWindow(svgOverlay, imageElement) {
         this.image2DBoxes = this.image2DBoxes || [];
         let isDrawing = false;
         let startPoint = null;
@@ -564,7 +613,7 @@ class AnnotationApp {
                 this.image2DBoxes.push(boxData);
                 
                 // Update box count
-                this.update2DBoxCount();
+                this.update2DBoxCountWindow();
                 
                 // Add click handler for selection
                 currentBox.addEventListener('click', (e) => {
@@ -605,11 +654,112 @@ class AnnotationApp {
         }
     }
     
+    update2DBoxCountWindow() {
+        const countElement = document.getElementById('2d-box-count-window');
+        if (countElement) {
+            const count = this.image2DBoxes ? this.image2DBoxes.length : 0;
+            countElement.textContent = `${count}`;
+        }
+    }
+    
+    makeDraggable(element, handle) {
+        let isDragging = false;
+        let startX, startY, startLeft, startTop;
+        
+        handle.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startLeft = parseInt(window.getComputedStyle(element).left, 10);
+            startTop = parseInt(window.getComputedStyle(element).top, 10);
+            
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+        
+        function onMouseMove(e) {
+            if (!isDragging) return;
+            
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            
+            element.style.left = (startLeft + dx) + 'px';
+            element.style.top = (startTop + dy) + 'px';
+            element.style.right = 'auto';
+            element.style.bottom = 'auto';
+        }
+        
+        function onMouseUp() {
+            isDragging = false;
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        }
+    }
+    
+    togglePointCloudOverlay() {
+        const canvas = document.getElementById('pc-overlay-canvas');
+        const btn = document.querySelector('button[title="Toggle Point Cloud Overlay"]');
+        
+        if (!canvas || !btn) return;
+        
+        const isVisible = canvas.style.display !== 'none';
+        
+        if (isVisible) {
+            canvas.style.display = 'none';
+            btn.textContent = '⚫ PC';
+            btn.style.background = '#333';
+            console.log('🔴 Point cloud overlay hidden');
+        } else {
+            canvas.style.display = 'block';
+            btn.textContent = '🔴 PC';
+            btn.style.background = '#aa0000';
+            this.renderPointCloudOverlay(canvas);
+            console.log('🔴 Point cloud overlay shown');
+        }
+    }
+    
+    renderPointCloudOverlay(canvas) {
+        if (!this.currentSceneData || !this.currentSceneData.point_cloud) {
+            console.log('⚠️ No point cloud data for overlay');
+            return;
+        }
+        
+        // Set canvas size to match container
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Simple point projection (this would normally use camera matrices)
+        const points = this.currentSceneData.point_cloud.points;
+        
+        // Simulate camera projection (simplified)
+        points.forEach(point => {
+            const [x, y, z, intensity] = point;
+            
+            // Simple perspective projection
+            const projectedX = (canvas.width / 2) + (x * 20);
+            const projectedY = (canvas.height / 2) - (z * 20);
+            
+            // Only render points that are in front of camera and within bounds
+            if (projectedX >= 0 && projectedX < canvas.width && 
+                projectedY >= 0 && projectedY < canvas.height && y > 0) {
+                
+                ctx.fillStyle = `rgba(0, 255, 255, ${intensity * 0.8})`;
+                ctx.fillRect(projectedX - 1, projectedY - 1, 2, 2);
+            }
+        });
+        
+        console.log(`📊 Rendered ${points.length} points on overlay`);
+    }
+    
     transitionTo2DMode() {
         // Smooth transition from 3D frustum click to 2D annotation mode
         console.log('🔄 Transitioning from 3D to 2D annotation mode...');
         
-        // Open the 2D annotation overlay
+        // Open the 2D annotation window
         this.toggle2DImageOverlay();
         
         // Optional: Add visual feedback for the transition
