@@ -14,7 +14,7 @@ class AnnotationApp {
         this.createScene();
         this.createSimpleGrid();
         this.createAxisDisplay();
-        this.createCameraFrustum();
+        this.createCameraFrustumStructure(); // Just structure, no image yet
         this.startRenderLoop();
         this.setupUI();
         this.hideInstructions();
@@ -200,8 +200,8 @@ class AnnotationApp {
         }
     }
     
-    createCameraFrustum() {
-        // Smaller, more realistic camera frustum
+    createCameraFrustumStructure() {
+        // Smaller, more realistic camera frustum - structure only, no image yet
         const position = new BABYLON.Vector3(0, 1.5, 1); // Lower camera position
         const fovH = Math.PI * 90 / 180; // 90° horizontal FOV (more realistic)
         const fovV = Math.PI * 50 / 180; // 50° vertical FOV 
@@ -255,17 +255,20 @@ class AnnotationApp {
         frustumMaterial.emissiveColor = new BABYLON.Color3(0, 1, 1); // Cyan color
         frustum.material = frustumMaterial;
         
-        // Create image plane on far plane
-        this.createFrustumImagePlane(farCorners);
-        
-        // Store frustum reference for later updates
+        // Store frustum data for later image plane creation
+        this.farCorners = farCorners;
         this.frustumMesh = frustum;
         
-        console.log('📹 Smaller camera frustum created with image plane');
+        console.log('📹 Camera frustum structure created (no image yet)');
     }
     
-    createFrustumImagePlane(farCorners) {
+    createFrustumImagePlane(farCorners, imageData) {
         try {
+            // Remove existing image plane
+            if (this.imagePlane) {
+                this.imagePlane.dispose();
+            }
+            
             // Create a plane mesh for the far plane
             const imagePlane = BABYLON.MeshBuilder.CreatePlane('imagePlane', {
                 width: Math.abs(farCorners[1].x - farCorners[0].x), // Width from corners
@@ -281,15 +284,21 @@ class AnnotationApp {
             // Create material for camera image
             const imageMaterial = new BABYLON.StandardMaterial('imageMat', this.scene);
             
-            // Load image from server
-            this.loadCameraImage(imageMaterial);
+            // Load the provided image data
+            if (imageData && imageData.image_data) {
+                const texture = new BABYLON.Texture(imageData.image_data, this.scene);
+                imageMaterial.diffuseTexture = texture;
+                imageMaterial.emissiveTexture = texture; // Make it glow slightly
+                imageMaterial.emissiveColor = new BABYLON.Color3(0.3, 0.3, 0.3);
+                console.log(`✅ Camera image loaded for preset: ${imageData.preset}`);
+            }
             
             imagePlane.material = imageMaterial;
             
             // Store reference for later updates
             this.imagePlane = imagePlane;
             
-            console.log('📸 Camera image plane created');
+            console.log('📸 Camera image plane created with scene data');
             
         } catch (error) {
             console.error('❌ Error creating image plane:', error);
@@ -355,11 +364,16 @@ class AnnotationApp {
                 border: 2px solid #00ffff;
             `;
             
-            // Load current camera image
-            const select = document.getElementById('preset-select');
-            const preset = select ? select.value : 'traffic_scene';
-            const apiBaseUrl = this.getApiBaseUrl();
-            img.src = `${apiBaseUrl}/api/camera/image/${preset}`;
+            // Use the current scene's camera image if available
+            if (this.currentSceneData && this.currentSceneData.camera_image) {
+                img.src = this.currentSceneData.camera_image.image_data;
+            } else {
+                // Fallback: load current camera image from server
+                const select = document.getElementById('preset-select');
+                const preset = select ? select.value : 'traffic_scene';
+                const apiBaseUrl = this.getApiBaseUrl();
+                img.src = `${apiBaseUrl}/api/camera/image/${preset}`;
+            }
             
             const closeBtn = document.createElement('button');
             closeBtn.textContent = '✕ Close';
@@ -752,13 +766,13 @@ class AnnotationApp {
         const select = document.getElementById('preset-select');
         const preset = select ? select.value : 'traffic_scene';
         
-        console.log(`🚀 Loading preset: ${preset}...`);
+        console.log(`🚀 Loading complete scene: ${preset}...`);
         
         try {
             const apiBaseUrl = this.getApiBaseUrl();
             console.log(`📡 API Base URL: ${apiBaseUrl}`);
             
-            const url = `${apiBaseUrl}/api/pointcloud/generate`;
+            const url = `${apiBaseUrl}/api/scene/generate`;
             console.log(`📞 Making request to: ${url}`);
             
             const requestBody = {
@@ -780,18 +794,29 @@ class AnnotationApp {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
             
-            const data = await response.json();
-            console.log('📊 Data received:', data.metadata);
+            const sceneData = await response.json();
+            console.log('🎬 Complete scene data received:', {
+                preset: sceneData.preset,
+                scene_type: sceneData.scene_type,
+                points: sceneData.point_cloud.points.length,
+                has_image: !!sceneData.camera_image.image_data
+            });
             
-            this.displayPoints(data.points);
+            // Store current scene data for other functions
+            this.currentSceneData = sceneData;
             
-            // Also update camera image with same preset
-            this.updateCameraImage(preset);
+            // Display point cloud
+            this.displayPoints(sceneData.point_cloud.points);
             
-            console.log(`✅ Successfully loaded ${preset} with ${data.points.length} points`);
+            // Create camera image plane with the scene's image data
+            this.createFrustumImagePlane(this.farCorners, sceneData.camera_image);
+            
+            console.log(`✅ Successfully loaded complete scene ${preset}`);
+            console.log(`   - Point cloud: ${sceneData.point_cloud.points.length} points`);
+            console.log(`   - Camera image: ${sceneData.camera_image.width}x${sceneData.camera_image.height}`);
             
         } catch (error) {
-            console.error('❌ CORS/Network Error:', error.name, error.message);
+            console.error('❌ Scene Loading Error:', error.name, error.message);
             alert('Generate Scene failed: ' + error.message);
         }
     }

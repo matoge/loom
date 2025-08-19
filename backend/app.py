@@ -299,6 +299,100 @@ class PointCloudProcessor:
 # Global processor instance
 processor = PointCloudProcessor()
 
+def generate_camera_image_data(preset):
+    """Generate camera image data for a given preset"""
+    try:
+        # Smaller size for frustum display (better performance)
+        width, height = 800, 400
+        image = Image.new('RGB', (width, height), color=(135, 150, 165))  # Sky blue
+        draw = ImageDraw.Draw(image)
+        
+        if preset == "traffic_scene" or preset == "urban_street" or preset == "parking_lot":
+            # Sky gradient
+            for y in range(height // 2):
+                color_val = int(135 + (y / (height // 2)) * 50)
+                draw.line([(0, y), (width, y)], fill=(color_val, color_val + 10, color_val + 30))
+            
+            # Road surface
+            draw.rectangle([0, int(height*0.5), width, height], fill=(45, 45, 50))
+            
+            # Lane markings (dashed yellow line)
+            for x in range(50, width, 100):
+                draw.rectangle([x, int(height*0.72), x+40, int(height*0.74)], fill=(255, 255, 0))
+            
+            # Side lane markings (white)
+            draw.rectangle([int(width*0.1), int(height*0.8), int(width*0.9), int(height*0.82)], fill=(200, 200, 200))
+            
+            # Traffic light pole and housing
+            pole_x = width * 0.5
+            pole_top = int(height * 0.1)
+            pole_bottom = int(height * 0.5) 
+            draw.rectangle([pole_x-5, pole_top, pole_x+5, pole_bottom], fill=(80, 80, 80))  # Pole
+            draw.rectangle([pole_x-25, pole_top, pole_x+25, int(height*0.2)], fill=(60, 60, 60))  # Housing
+            
+            # Traffic lights (red, yellow, green circles) - fix coordinate order
+            light_top = int(height*0.11)
+            light_bottom = int(height*0.13)
+            draw.ellipse([pole_x-20, light_top, pole_x-5, light_bottom], fill=(255, 50, 50))    # Red
+            draw.ellipse([pole_x-5, light_top, pole_x+10, light_bottom], fill=(255, 255, 100))  # Yellow  
+            draw.ellipse([pole_x+10, light_top, pole_x+25, light_bottom], fill=(100, 255, 100)) # Green
+            
+            # Cars on road
+            # Car 1 (left side)
+            car1_x = int(width * 0.25)
+            car1_top = int(height*0.52)
+            car1_body_bottom = int(height*0.68)
+            car1_window_bottom = int(height*0.58)
+            car1_wheel_top = int(height*0.65)
+            car1_wheel_bottom = int(height*0.7)
+            
+            draw.rectangle([car1_x, car1_top+10, car1_x+80, car1_body_bottom], fill=(150, 80, 80))    # Body
+            draw.rectangle([car1_x+10, car1_top, car1_x+70, car1_window_bottom], fill=(180, 180, 220))  # Windows
+            draw.ellipse([car1_x+5, car1_wheel_top, car1_x+20, car1_wheel_bottom], fill=(40, 40, 40))     # Wheel
+            draw.ellipse([car1_x+60, car1_wheel_top, car1_x+75, car1_wheel_bottom], fill=(40, 40, 40))    # Wheel
+            
+            # Car 2 (right side, farther)
+            car2_x = int(width * 0.65)
+            car2_top = int(height*0.56)
+            car2_body_bottom = int(height*0.67)
+            car2_window_bottom = int(height*0.6)
+            car2_wheel_top = int(height*0.64)
+            car2_wheel_bottom = int(height*0.68)
+            
+            draw.rectangle([car2_x, car2_top+5, car2_x+60, car2_body_bottom], fill=(80, 120, 80))    # Body
+            draw.rectangle([car2_x+8, car2_top, car2_x+52, car2_window_bottom], fill=(180, 180, 220)) # Windows
+            draw.ellipse([car2_x+5, car2_wheel_top, car2_x+15, car2_wheel_bottom], fill=(40, 40, 40))     # Wheel
+            draw.ellipse([car2_x+45, car2_wheel_top, car2_x+55, car2_wheel_bottom], fill=(40, 40, 40))    # Wheel
+            
+            # Distant buildings/structures
+            draw.rectangle([0, int(height*0.3), int(width*0.3), int(height*0.5)], fill=(120, 120, 130))
+            draw.rectangle([int(width*0.7), int(height*0.25), width, int(height*0.5)], fill=(110, 110, 125))
+            
+        else:
+            # Default fallback scene
+            draw.rectangle([0, int(height*0.6), width, height], fill=(50, 50, 55))
+            draw.rectangle([int(width*0.4), int(height*0.4), int(width*0.6), int(height*0.6)], fill=(100, 100, 120))
+        
+        # Convert to base64 data URL
+        buffer = io.BytesIO()
+        image.save(buffer, format='PNG', optimize=True)
+        image_base64 = base64.b64encode(buffer.getvalue()).decode()
+        image_data_url = f'data:image/png;base64,{image_base64}'
+        
+        return {
+            'image_data': image_data_url,
+            'width': width,
+            'height': height,
+            'preset': preset
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating camera image data: {e}")
+        return {
+            'error': 'Failed to generate camera image',
+            'preset': preset
+        }
+
 @app.route('/')
 def serve_frontend():
     """Serve the frontend application"""
@@ -362,9 +456,58 @@ def get_presets():
         ]
     })
 
+@app.route('/api/scene/generate', methods=['POST', 'OPTIONS'])
+def generate_complete_scene():
+    """Generate complete scene with both point cloud and camera image"""
+    # Handle preflight request
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'})
+    
+    data = request.get_json()
+    
+    preset = data.get('preset', 'traffic_scene')
+    num_points = data.get('num_points', 10000)
+    include_labels = data.get('include_labels', True)
+    
+    start_time = time.time()
+    
+    # Generate point cloud using PyArrow for performance
+    table = processor.generate_sample_data(preset, num_points)
+    
+    # Generate camera image
+    camera_image_data = generate_camera_image_data(preset)
+    
+    # Convert to unified scene response
+    result = {
+        'scene_type': 'complete',
+        'preset': preset,
+        'point_cloud': {
+            'points': table.select(['x', 'y', 'z', 'intensity']).to_pandas().values.tolist(),
+            'metadata': {
+                'num_points': len(table),
+                'generation_time_ms': round((time.time() - start_time) * 1000, 2),
+                'bounds': {
+                    'x_min': float(table['x'].to_pandas().min()),
+                    'x_max': float(table['x'].to_pandas().max()),
+                    'y_min': float(table['y'].to_pandas().min()),
+                    'y_max': float(table['y'].to_pandas().max()),
+                    'z_min': float(table['z'].to_pandas().min()),
+                    'z_max': float(table['z'].to_pandas().max()),
+                }
+            }
+        },
+        'camera_image': camera_image_data,
+        'generation_time_ms': round((time.time() - start_time) * 1000, 2)
+    }
+    
+    if include_labels:
+        result['point_cloud']['labels'] = table['label'].to_pandas().tolist()
+    
+    return jsonify(result)
+
 @app.route('/api/pointcloud/generate', methods=['POST', 'OPTIONS'])
 def generate_pointcloud():
-    """Generate sample point cloud with visual feedback"""
+    """Generate sample point cloud with visual feedback (legacy endpoint)"""
     # Handle preflight request
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'})
