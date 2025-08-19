@@ -298,7 +298,17 @@ class AnnotationApp {
             // Store reference for later updates
             this.imagePlane = imagePlane;
             
-            console.log('📸 Camera image plane created with scene data');
+            // Add click handler to transition to 2D mode
+            imagePlane.actionManager = new BABYLON.ActionManager(this.scene);
+            imagePlane.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
+                BABYLON.ActionManager.OnPickTrigger,
+                () => {
+                    console.log('📸 Clicked on camera frustum image - transitioning to 2D mode');
+                    this.transitionTo2DMode();
+                }
+            ));
+            
+            console.log('📸 Camera image plane created with scene data and click handler');
             
         } catch (error) {
             console.error('❌ Error creating image plane:', error);
@@ -337,65 +347,282 @@ class AnnotationApp {
     }
     
     toggle2DImageOverlay() {
+        // Check if we have scene data with camera image
+        if (!this.currentSceneData || !this.currentSceneData.camera_image) {
+            alert('Please generate a scene first to view 2D camera image');
+            return;
+        }
+        
         // Create or toggle a full-screen 2D camera overlay
         let overlay = document.getElementById('camera-2d-overlay');
         
         if (!overlay) {
-            // Create the overlay
-            overlay = document.createElement('div');
-            overlay.id = 'camera-2d-overlay';
-            overlay.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0, 0, 0, 0.9);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                z-index: 1000;
-            `;
-            
-            const img = document.createElement('img');
-            img.style.cssText = `
-                max-width: 90%;
-                max-height: 90%;
-                border: 2px solid #00ffff;
-            `;
-            
-            // Use the current scene's camera image if available
-            if (this.currentSceneData && this.currentSceneData.camera_image) {
-                img.src = this.currentSceneData.camera_image.image_data;
-            } else {
-                // Fallback: load current camera image from server
-                const select = document.getElementById('preset-select');
-                const preset = select ? select.value : 'traffic_scene';
-                const apiBaseUrl = this.getApiBaseUrl();
-                img.src = `${apiBaseUrl}/api/camera/image/${preset}`;
-            }
-            
-            const closeBtn = document.createElement('button');
-            closeBtn.textContent = '✕ Close';
-            closeBtn.style.cssText = `
-                position: absolute;
-                top: 20px;
-                right: 20px;
-                padding: 10px 20px;
-                background: #ff4444;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                cursor: pointer;
-            `;
-            closeBtn.onclick = () => overlay.style.display = 'none';
-            
-            overlay.appendChild(img);
-            overlay.appendChild(closeBtn);
-            document.body.appendChild(overlay);
+            overlay = this.create2DAnnotationOverlay();
         } else {
             // Toggle visibility
             overlay.style.display = overlay.style.display === 'none' ? 'flex' : 'none';
+        }
+    }
+    
+    create2DAnnotationOverlay() {
+        // Create the full-screen 2D annotation overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'camera-2d-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        `;
+        
+        // Create container for image and annotations
+        const imageContainer = document.createElement('div');
+        imageContainer.style.cssText = `
+            position: relative;
+            max-width: 90%;
+            max-height: 80%;
+            border: 2px solid #00ffff;
+            overflow: hidden;
+        `;
+        
+        // Camera image
+        const img = document.createElement('img');
+        img.style.cssText = `
+            width: 100%;
+            height: auto;
+            display: block;
+        `;
+        img.src = this.currentSceneData.camera_image.image_data;
+        
+        // SVG overlay for drawing 2D bounding boxes
+        const svgOverlay = document.createElement('svg');
+        svgOverlay.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: all;
+            cursor: crosshair;
+        `;
+        
+        // Control bar
+        const controlBar = document.createElement('div');
+        controlBar.style.cssText = `
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+        `;
+        
+        const modeText = document.createElement('span');
+        modeText.textContent = `2D Annotation Mode (${this.currentSceneData.preset}) - Click & drag to draw boxes`;
+        modeText.style.marginRight = '15px';
+        
+        const boxCountText = document.createElement('span');
+        boxCountText.id = '2d-box-count';
+        boxCountText.textContent = '0 boxes';
+        boxCountText.style.cssText = `
+            margin-right: 15px;
+            padding: 4px 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        `;
+        
+        const backTo3DBtn = document.createElement('button');
+        backTo3DBtn.textContent = '← Back to 3D';
+        backTo3DBtn.style.cssText = `
+            padding: 8px 15px;
+            background: #00aa00;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-right: 10px;
+        `;
+        backTo3DBtn.onclick = () => overlay.style.display = 'none';
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = '✕ Close';
+        closeBtn.style.cssText = `
+            padding: 8px 15px;
+            background: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        `;
+        closeBtn.onclick = () => overlay.style.display = 'none';
+        
+        // Setup 2D box drawing
+        this.setup2DBoxDrawing(svgOverlay, img);
+        
+        // Assemble overlay
+        controlBar.appendChild(modeText);
+        controlBar.appendChild(boxCountText);
+        controlBar.appendChild(backTo3DBtn);
+        controlBar.appendChild(closeBtn);
+        
+        imageContainer.appendChild(img);
+        imageContainer.appendChild(svgOverlay);
+        overlay.appendChild(controlBar);
+        overlay.appendChild(imageContainer);
+        
+        document.body.appendChild(overlay);
+        
+        console.log('📐 2D annotation overlay created');
+        return overlay;
+    }
+    
+    setup2DBoxDrawing(svgOverlay, imageElement) {
+        this.image2DBoxes = this.image2DBoxes || [];
+        let isDrawing = false;
+        let startPoint = null;
+        let currentBox = null;
+        
+        svgOverlay.addEventListener('mousedown', (e) => {
+            const rect = svgOverlay.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100; // Percentage
+            const y = ((e.clientY - rect.top) / rect.height) * 100;  // Percentage
+            
+            isDrawing = true;
+            startPoint = { x, y };
+            
+            // Create new SVG rectangle
+            currentBox = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            currentBox.setAttribute('x', x + '%');
+            currentBox.setAttribute('y', y + '%');
+            currentBox.setAttribute('width', '0%');
+            currentBox.setAttribute('height', '0%');
+            currentBox.setAttribute('fill', 'none');
+            currentBox.setAttribute('stroke', '#00ff00');
+            currentBox.setAttribute('stroke-width', '2');
+            currentBox.setAttribute('stroke-dasharray', '5,5');
+            
+            svgOverlay.appendChild(currentBox);
+        });
+        
+        svgOverlay.addEventListener('mousemove', (e) => {
+            if (!isDrawing || !currentBox) return;
+            
+            const rect = svgOverlay.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            
+            const width = Math.abs(x - startPoint.x);
+            const height = Math.abs(y - startPoint.y);
+            const minX = Math.min(x, startPoint.x);
+            const minY = Math.min(y, startPoint.y);
+            
+            currentBox.setAttribute('x', minX + '%');
+            currentBox.setAttribute('y', minY + '%');
+            currentBox.setAttribute('width', width + '%');
+            currentBox.setAttribute('height', height + '%');
+        });
+        
+        svgOverlay.addEventListener('mouseup', (e) => {
+            if (!isDrawing || !currentBox) return;
+            
+            isDrawing = false;
+            
+            // Get final box dimensions
+            const rect = svgOverlay.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            
+            const width = Math.abs(x - startPoint.x);
+            const height = Math.abs(y - startPoint.y);
+            
+            // Only keep box if it has meaningful size
+            if (width > 1 && height > 1) {
+                // Make box solid and add click handler
+                currentBox.setAttribute('stroke', '#00ff00');
+                currentBox.setAttribute('stroke-dasharray', 'none');
+                currentBox.setAttribute('fill', 'rgba(0, 255, 0, 0.1)');
+                
+                // Store box data
+                const boxData = {
+                    element: currentBox,
+                    id: `2d_box_${this.image2DBoxes.length + 1}`,
+                    x: Math.min(x, startPoint.x),
+                    y: Math.min(y, startPoint.y),
+                    width: width,
+                    height: height,
+                    label: 'object_2d'
+                };
+                
+                this.image2DBoxes.push(boxData);
+                
+                // Update box count
+                this.update2DBoxCount();
+                
+                // Add click handler for selection
+                currentBox.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.select2DBox(boxData);
+                });
+                
+                console.log('📦 Created 2D box:', boxData);
+            } else {
+                // Remove too small boxes
+                svgOverlay.removeChild(currentBox);
+            }
+            
+            currentBox = null;
+            startPoint = null;
+        });
+    }
+    
+    select2DBox(boxData) {
+        // Deselect all boxes
+        this.image2DBoxes.forEach(box => {
+            box.element.setAttribute('stroke', '#00ff00');
+            box.element.setAttribute('stroke-width', '2');
+        });
+        
+        // Select this box
+        boxData.element.setAttribute('stroke', '#ff0000');
+        boxData.element.setAttribute('stroke-width', '3');
+        
+        console.log('📦 Selected 2D box:', boxData.id);
+    }
+    
+    update2DBoxCount() {
+        const countElement = document.getElementById('2d-box-count');
+        if (countElement) {
+            const count = this.image2DBoxes ? this.image2DBoxes.length : 0;
+            countElement.textContent = `${count} boxes`;
+        }
+    }
+    
+    transitionTo2DMode() {
+        // Smooth transition from 3D frustum click to 2D annotation mode
+        console.log('🔄 Transitioning from 3D to 2D annotation mode...');
+        
+        // Open the 2D annotation overlay
+        this.toggle2DImageOverlay();
+        
+        // Optional: Add visual feedback for the transition
+        if (this.imagePlane) {
+            // Brief highlight animation
+            const originalColor = this.imagePlane.material.emissiveColor.clone();
+            this.imagePlane.material.emissiveColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+            
+            setTimeout(() => {
+                if (this.imagePlane && this.imagePlane.material) {
+                    this.imagePlane.material.emissiveColor = originalColor;
+                }
+            }, 200);
         }
     }
     
