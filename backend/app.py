@@ -85,6 +85,71 @@ class PointCloudProcessor:
         
         return self._to_pyarrow_table(points[:num_points], labels[:num_points])
     
+    def _create_urban_street(self, num_points):
+        """Create urban street scene with buildings and parked cars"""
+        points = []
+        labels = []
+        
+        # Buildings on both sides
+        for i, pos in enumerate([[-15, 0, 8], [15, 0, 10], [-18, -8, 6], [18, 8, 12]]):
+            building_points = self._generate_building(pos, 400)
+            points.extend(building_points)
+            labels.extend([f"building_{i+1}"] * len(building_points))
+        
+        # Parked cars along street
+        car_positions = [
+            [-8, -3, 0.8, 0], [-4, -3, 0.8, 0], [4, -3, 0.8, 0], [8, -3, 0.8, 0],  # Left side
+            [-8, 3, 0.8, 3.14], [-4, 3, 0.8, 3.14], [4, 3, 0.8, 3.14], [8, 3, 0.8, 3.14]  # Right side
+        ]
+        
+        for i, (x, y, z, yaw) in enumerate(car_positions):
+            car_points = self._generate_car([x, y, z], yaw, 250)
+            points.extend(car_points)
+            labels.extend([f"parked_car_{i+1}"] * len(car_points))
+        
+        # Street surface
+        remaining = num_points - len(points)
+        street_points = self._generate_street_surface(remaining)
+        points.extend(street_points)
+        labels.extend(["street"] * len(street_points))
+        
+        return self._to_pyarrow_table(points[:num_points], labels[:num_points])
+    
+    def _create_parking_lot(self, num_points):
+        """Create parking lot with multiple parked vehicles"""
+        points = []
+        labels = []
+        
+        # Parked cars in grid pattern
+        rows = 3
+        cols = 6
+        car_count = 0
+        for row in range(rows):
+            for col in range(cols):
+                if np.random.random() > 0.2:  # 80% occupancy
+                    x = -10 + col * 4
+                    y = -6 + row * 4
+                    z = 0.8
+                    yaw = np.random.choice([0, 3.14])  # Facing either direction
+                    
+                    car_points = self._generate_car([x, y, z], yaw, 300)
+                    points.extend(car_points)
+                    labels.extend([f"parking_car_{car_count+1}"] * len(car_points))
+                    car_count += 1
+        
+        # Shopping center building 
+        building_points = self._generate_building([0, -15, 6], 500)
+        points.extend(building_points)
+        labels.extend(["shopping_center"] * len(building_points))
+        
+        # Parking lot surface
+        remaining = num_points - len(points)
+        lot_points = self._generate_parking_surface(remaining)
+        points.extend(lot_points)
+        labels.extend(["parking_lot"] * len(lot_points))
+        
+        return self._to_pyarrow_table(points[:num_points], labels[:num_points])
+    
     def _generate_traffic_light(self, center, num_points=200):
         """Generate realistic traffic light points"""
         points = []
@@ -150,6 +215,68 @@ class PointCloudProcessor:
             y = np.random.uniform(-15, 15)
             z = np.random.uniform(-0.1, 0.1)  # Slightly uneven road
             intensity = 0.2 + np.random.uniform(0, 0.2)  # Dark road surface
+            points.append([x, y, z, intensity])
+        
+        return points
+    
+    def _generate_building(self, center, num_points=500):
+        """Generate building point cloud"""
+        points = []
+        x, y, z = center
+        
+        # Building dimensions
+        width, depth, height = 8, 8, z
+        
+        for i in range(num_points):
+            # Generate points on building surfaces
+            if np.random.random() < 0.7:  # Walls
+                face = np.random.choice(['front', 'back', 'left', 'right'])
+                if face == 'front':
+                    px = x + np.random.uniform(-width/2, width/2)
+                    py = y + depth/2 + np.random.uniform(-0.1, 0.1)
+                    pz = np.random.uniform(0, height)
+                elif face == 'back':
+                    px = x + np.random.uniform(-width/2, width/2)
+                    py = y - depth/2 + np.random.uniform(-0.1, 0.1)
+                    pz = np.random.uniform(0, height)
+                elif face == 'left':
+                    px = x - width/2 + np.random.uniform(-0.1, 0.1)
+                    py = y + np.random.uniform(-depth/2, depth/2)
+                    pz = np.random.uniform(0, height)
+                else:  # right
+                    px = x + width/2 + np.random.uniform(-0.1, 0.1)
+                    py = y + np.random.uniform(-depth/2, depth/2)
+                    pz = np.random.uniform(0, height)
+            else:  # Roof
+                px = x + np.random.uniform(-width/2, width/2)
+                py = y + np.random.uniform(-depth/2, depth/2)
+                pz = height + np.random.uniform(-0.1, 0.1)
+            
+            intensity = 0.5 + np.random.uniform(0, 0.3)
+            points.append([px, py, pz, intensity])
+        
+        return points
+    
+    def _generate_street_surface(self, num_points):
+        """Generate street surface points"""
+        points = []
+        for i in range(num_points):
+            x = np.random.uniform(-25, 25)
+            y = np.random.uniform(-15, 15)
+            z = np.random.uniform(-0.1, 0.1)  # Slightly uneven street
+            intensity = 0.25 + np.random.uniform(0, 0.15)  # Dark street surface
+            points.append([x, y, z, intensity])
+        
+        return points
+    
+    def _generate_parking_surface(self, num_points):
+        """Generate parking lot surface points"""
+        points = []
+        for i in range(num_points):
+            x = np.random.uniform(-20, 20)
+            y = np.random.uniform(-12, 12)
+            z = np.random.uniform(-0.05, 0.05)  # Flat parking lot
+            intensity = 0.3 + np.random.uniform(0, 0.2)  # Lighter than road
             points.append([x, y, z, intensity])
         
         return points

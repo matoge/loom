@@ -327,6 +327,73 @@ class AnnotationApp {
         }
     }
     
+    toggle2DImageOverlay() {
+        // Create or toggle a full-screen 2D camera overlay
+        let overlay = document.getElementById('camera-2d-overlay');
+        
+        if (!overlay) {
+            // Create the overlay
+            overlay = document.createElement('div');
+            overlay.id = 'camera-2d-overlay';
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.9);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000;
+            `;
+            
+            const img = document.createElement('img');
+            img.style.cssText = `
+                max-width: 90%;
+                max-height: 90%;
+                border: 2px solid #00ffff;
+            `;
+            
+            // Load current camera image
+            const select = document.getElementById('preset-select');
+            const preset = select ? select.value : 'traffic_scene';
+            const apiBaseUrl = this.getApiBaseUrl();
+            img.src = `${apiBaseUrl}/api/camera/image/${preset}`;
+            
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '✕ Close';
+            closeBtn.style.cssText = `
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                padding: 10px 20px;
+                background: #ff4444;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+            `;
+            closeBtn.onclick = () => overlay.style.display = 'none';
+            
+            overlay.appendChild(img);
+            overlay.appendChild(closeBtn);
+            document.body.appendChild(overlay);
+        } else {
+            // Toggle visibility
+            overlay.style.display = overlay.style.display === 'none' ? 'flex' : 'none';
+        }
+    }
+    
+    toggleCameraFrustum() {
+        if (this.frustumMesh) {
+            this.frustumMesh.isVisible = !this.frustumMesh.isVisible;
+        }
+        if (this.imagePlane) {
+            this.imagePlane.isVisible = !this.imagePlane.isVisible;
+        }
+    }
+    
     startRenderLoop() {
         this.engine.runRenderLoop(() => this.scene.render());
         window.addEventListener('resize', () => this.engine.resize());
@@ -394,15 +461,12 @@ class AnnotationApp {
             });
         }
         
-        // 2D View (show image container)
+        // 2D View (show camera image overlay)
         const view2D = document.getElementById('view-2d');
         if (view2D) {
             view2D.addEventListener('click', () => {
-                const imageContainer = document.getElementById('image-2d-container');
-                if (imageContainer) {
-                    imageContainer.classList.toggle('hidden');
-                    console.log('🖼️ 2D view toggled');
-                }
+                this.toggle2DImageOverlay();
+                console.log('🖼️ 2D camera view toggled');
             });
         }
         
@@ -410,7 +474,8 @@ class AnnotationApp {
         const toggleFrustum = document.getElementById('toggle-frustum');
         if (toggleFrustum) {
             toggleFrustum.addEventListener('click', () => {
-                console.log('📹 Camera frustum toggle (already visible)');
+                this.toggleCameraFrustum();
+                console.log('📹 Camera frustum visibility toggled');
             });
         }
     }
@@ -532,6 +597,13 @@ class AnnotationApp {
             }
         };
         
+        // Add selection capability
+        box.actionManager = new BABYLON.ActionManager(this.scene);
+        box.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
+            BABYLON.ActionManager.OnPickTrigger, 
+            () => this.selectBox(box)
+        ));
+        
         this.annotationBoxes.push(box);
         this.updateObjectsList();
         
@@ -567,9 +639,67 @@ class AnnotationApp {
         }
     }
     
+    selectBox(box) {
+        // Deselect previous box
+        if (this.selectedBox) {
+            this.selectedBox.material.emissiveColor = new BABYLON.Color3(1, 0.5, 0); // Orange
+            this.hideEditingHandles();
+        }
+        
+        // Select new box
+        this.selectedBox = box;
+        box.material.emissiveColor = new BABYLON.Color3(0, 1, 0); // Green when selected
+        this.showEditingHandles(box);
+        
+        console.log('📦 Selected box:', box.metadata.id);
+    }
+    
+    showEditingHandles(box) {
+        // Remove existing handles
+        this.hideEditingHandles();
+        
+        this.editingHandles = [];
+        const handleSize = 0.3;
+        
+        // Get box dimensions
+        const width = box.metadata.dimensions.width;
+        const height = box.metadata.dimensions.height;
+        const depth = box.metadata.dimensions.depth;
+        
+        // Create corner handles
+        const corners = [
+            [-width/2, height/2, -depth/2], [width/2, height/2, -depth/2],
+            [-width/2, height/2, depth/2], [width/2, height/2, depth/2],
+            [-width/2, -height/2, -depth/2], [width/2, -height/2, -depth/2],
+            [-width/2, -height/2, depth/2], [width/2, -height/2, depth/2]
+        ];
+        
+        corners.forEach((corner, index) => {
+            const handle = BABYLON.MeshBuilder.CreateSphere(`handle_${index}`, {diameter: handleSize}, this.scene);
+            handle.position = box.position.add(new BABYLON.Vector3(corner[0], corner[1], corner[2]));
+            
+            const handleMat = new BABYLON.StandardMaterial(`handleMat_${index}`, this.scene);
+            handleMat.diffuseColor = new BABYLON.Color3(1, 1, 0); // Yellow handles
+            handle.material = handleMat;
+            
+            this.editingHandles.push(handle);
+        });
+    }
+    
+    hideEditingHandles() {
+        if (this.editingHandles) {
+            this.editingHandles.forEach(handle => handle.dispose());
+            this.editingHandles = [];
+        }
+    }
+    
     deleteBox(boxId) {
         const boxIndex = this.annotationBoxes.findIndex(box => box.metadata.id === boxId);
         if (boxIndex >= 0) {
+            if (this.selectedBox === this.annotationBoxes[boxIndex]) {
+                this.hideEditingHandles();
+                this.selectedBox = null;
+            }
             this.annotationBoxes[boxIndex].dispose();
             this.annotationBoxes.splice(boxIndex, 1);
             this.updateObjectsList();
