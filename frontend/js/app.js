@@ -538,6 +538,7 @@ class AnnotationApp {
             width: 100%;
             height: 100%;
             pointer-events: none;
+            z-index: 10;
             display: none;
         `;
         
@@ -597,6 +598,13 @@ class AnnotationApp {
         // Prevent default drag behavior
         svgOverlay.addEventListener('dragstart', (e) => e.preventDefault());
         svgOverlay.addEventListener('selectstart', (e) => e.preventDefault());
+        
+        // Deselect boxes when clicking on empty area
+        svgOverlay.addEventListener('click', (e) => {
+            if (e.target === svgOverlay) {
+                this.deselect2DBoxes();
+            }
+        });
         
         svgOverlay.addEventListener('mousedown', (e) => {
             console.log('📦 SVG mousedown triggered - button:', e.button);
@@ -711,21 +719,361 @@ class AnnotationApp {
             startPoint = null;
         });
         
+        // Add keyboard support for box operations
+        document.addEventListener('keydown', (e) => {
+            if (this.selected2DBox) {
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                    e.preventDefault();
+                    this.delete2DBox(this.selected2DBox);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.deselect2DBoxes();
+                }
+            }
+        });
+        
         console.log('✅ 2D box drawing setup complete');
     }
     
+    deselect2DBoxes() {
+        if (this.selected2DBox) {
+            this.selected2DBox.element.setAttribute('stroke', '#00ff00');
+            this.selected2DBox.element.setAttribute('stroke-width', '2');
+            this.remove2DBoxHandles(this.selected2DBox);
+            this.selected2DBox = null;
+            console.log('📦 Deselected 2D boxes');
+        }
+    }
+    
+    delete2DBox(boxData) {
+        const index = this.image2DBoxes.indexOf(boxData);
+        if (index >= 0) {
+            // Remove handles
+            this.remove2DBoxHandles(boxData);
+            
+            // Remove element from SVG
+            if (boxData.element.parentElement) {
+                boxData.element.parentElement.removeChild(boxData.element);
+            }
+            
+            // Remove from array
+            this.image2DBoxes.splice(index, 1);
+            
+            // Clear selection
+            this.selected2DBox = null;
+            
+            // Update count
+            this.update2DBoxCountWindow();
+            
+            console.log('🗑️ Deleted 2D box:', boxData.id);
+        }
+    }
+    
+    show2DEditHelp() {
+        // Create temporary help overlay
+        const existingHelp = document.getElementById('2d-edit-help');
+        if (existingHelp) existingHelp.remove();
+        
+        const helpDiv = document.createElement('div');
+        helpDiv.id = '2d-edit-help';
+        helpDiv.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 10000;
+            border: 2px solid #ff0000;
+            text-align: center;
+            pointer-events: none;
+        `;
+        
+        helpDiv.innerHTML = `
+            <strong>📦 2D Box Edit Mode</strong><br>
+            🔴 <strong>Red handles:</strong> Drag to resize<br>
+            🟡 <strong>Yellow handle:</strong> Drag to move<br>
+            <strong>Ctrl+Drag:</strong> Move entire box<br>
+            <strong>Delete/Backspace:</strong> Delete box<br>
+            <strong>Escape:</strong> Deselect
+        `;
+        
+        document.body.appendChild(helpDiv);
+        
+        // Auto-remove after 4 seconds
+        setTimeout(() => {
+            if (helpDiv.parentElement) {
+                helpDiv.remove();
+            }
+        }, 4000);
+    }
+    
     select2DBox(boxData) {
-        // Deselect all boxes
+        // Deselect all boxes and remove handles
         this.image2DBoxes.forEach(box => {
             box.element.setAttribute('stroke', '#00ff00');
             box.element.setAttribute('stroke-width', '2');
+            this.remove2DBoxHandles(box);
         });
         
         // Select this box
         boxData.element.setAttribute('stroke', '#ff0000');
         boxData.element.setAttribute('stroke-width', '3');
         
+        // Add edit handles
+        this.add2DBoxHandles(boxData);
+        
+        // Store selected box reference
+        this.selected2DBox = boxData;
+        
+        // Show help text temporarily
+        this.show2DEditHelp();
+        
         console.log('📦 Selected 2D box:', boxData.id);
+    }
+    
+    add2DBoxHandles(boxData) {
+        // Remove existing handles first
+        this.remove2DBoxHandles(boxData);
+        
+        const svg = boxData.element.parentElement;
+        if (!svg) return;
+        
+        const x = parseFloat(boxData.element.getAttribute('x'));
+        const y = parseFloat(boxData.element.getAttribute('y'));
+        const width = parseFloat(boxData.element.getAttribute('width'));
+        const height = parseFloat(boxData.element.getAttribute('height'));
+        
+        // Create handles array
+        boxData.handles = [];
+        
+        // Handle positions (top-left, top-right, bottom-left, bottom-right, center)
+        const handlePositions = [
+            { x: x, y: y, type: 'tl' },                    // top-left
+            { x: x + width, y: y, type: 'tr' },           // top-right
+            { x: x, y: y + height, type: 'bl' },          // bottom-left
+            { x: x + width, y: y + height, type: 'br' },  // bottom-right
+            { x: x + width/2, y: y + height/2, type: 'move' } // center (move)
+        ];
+        
+        handlePositions.forEach(pos => {
+            const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            handle.setAttribute('cx', pos.x + '%');
+            handle.setAttribute('cy', pos.y + '%');
+            handle.setAttribute('r', '1%');
+            handle.setAttribute('fill', pos.type === 'move' ? '#ffff00' : '#ff0000');
+            handle.setAttribute('stroke', '#000000');
+            handle.setAttribute('stroke-width', '0.5');
+            handle.style.cursor = pos.type === 'move' ? 'move' : 'resize';
+            handle.setAttribute('data-handle-type', pos.type);
+            
+            // Add drag functionality to handle
+            this.make2DHandleDraggable(handle, boxData, pos.type);
+            
+            svg.appendChild(handle);
+            boxData.handles.push(handle);
+        });
+        
+        // Make the box itself draggable for movement
+        this.make2DBoxDraggable(boxData);
+    }
+    
+    remove2DBoxHandles(boxData) {
+        if (boxData.handles) {
+            boxData.handles.forEach(handle => {
+                if (handle.parentElement) {
+                    handle.parentElement.removeChild(handle);
+                }
+            });
+            boxData.handles = [];
+        }
+    }
+    
+    make2DBoxDraggable(boxData) {
+        const element = boxData.element;
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+        let startBoxX = 0;
+        let startBoxY = 0;
+        
+        element.addEventListener('mousedown', (e) => {
+            if (e.ctrlKey || e.metaKey) { // Only drag when Ctrl/Cmd is held
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const svg = element.parentElement;
+                const rect = svg.getBoundingClientRect();
+                
+                isDragging = true;
+                startX = ((e.clientX - rect.left) / rect.width) * 100;
+                startY = ((e.clientY - rect.top) / rect.height) * 100;
+                startBoxX = parseFloat(element.getAttribute('x'));
+                startBoxY = parseFloat(element.getAttribute('y'));
+                
+                svg.style.cursor = 'move';
+                
+                console.log('📦 Started dragging 2D box');
+            }
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            e.preventDefault();
+            
+            const svg = element.parentElement;
+            const rect = svg.getBoundingClientRect();
+            
+            const currentX = ((e.clientX - rect.left) / rect.width) * 100;
+            const currentY = ((e.clientY - rect.top) / rect.height) * 100;
+            
+            const deltaX = currentX - startX;
+            const deltaY = currentY - startY;
+            
+            const newX = startBoxX + deltaX;
+            const newY = startBoxY + deltaY;
+            
+            // Update box position
+            element.setAttribute('x', newX + '%');
+            element.setAttribute('y', newY + '%');
+            
+            // Update box data
+            boxData.x = newX;
+            boxData.y = newY;
+            
+            // Update handles
+            this.update2DBoxHandles(boxData);
+        });
+        
+        document.addEventListener('mouseup', (e) => {
+            if (isDragging) {
+                isDragging = false;
+                const svg = element.parentElement;
+                svg.style.cursor = 'crosshair';
+                console.log('📦 Finished dragging 2D box');
+            }
+        });
+    }
+    
+    make2DHandleDraggable(handle, boxData, handleType) {
+        let isDragging = false;
+        
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isDragging = true;
+            console.log('🔴 Started dragging handle:', handleType);
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            e.preventDefault();
+            
+            const svg = handle.parentElement;
+            const rect = svg.getBoundingClientRect();
+            
+            const mouseX = ((e.clientX - rect.left) / rect.width) * 100;
+            const mouseY = ((e.clientY - rect.top) / rect.height) * 100;
+            
+            // Update box based on handle type
+            this.update2DBoxFromHandle(boxData, handleType, mouseX, mouseY);
+        });
+        
+        document.addEventListener('mouseup', (e) => {
+            if (isDragging) {
+                isDragging = false;
+                console.log('🔴 Finished dragging handle');
+            }
+        });
+    }
+    
+    update2DBoxFromHandle(boxData, handleType, mouseX, mouseY) {
+        const element = boxData.element;
+        
+        let x = parseFloat(element.getAttribute('x'));
+        let y = parseFloat(element.getAttribute('y'));
+        let width = parseFloat(element.getAttribute('width'));
+        let height = parseFloat(element.getAttribute('height'));
+        
+        switch(handleType) {
+            case 'tl': // top-left
+                const newWidth = width + (x - mouseX);
+                const newHeight = height + (y - mouseY);
+                if (newWidth > 1 && newHeight > 1) {
+                    element.setAttribute('x', mouseX + '%');
+                    element.setAttribute('y', mouseY + '%');
+                    element.setAttribute('width', newWidth + '%');
+                    element.setAttribute('height', newHeight + '%');
+                }
+                break;
+            case 'tr': // top-right
+                const rightWidth = mouseX - x;
+                const topHeight = height + (y - mouseY);
+                if (rightWidth > 1 && topHeight > 1) {
+                    element.setAttribute('y', mouseY + '%');
+                    element.setAttribute('width', rightWidth + '%');
+                    element.setAttribute('height', topHeight + '%');
+                }
+                break;
+            case 'bl': // bottom-left
+                const leftWidth = width + (x - mouseX);
+                const bottomHeight = mouseY - y;
+                if (leftWidth > 1 && bottomHeight > 1) {
+                    element.setAttribute('x', mouseX + '%');
+                    element.setAttribute('width', leftWidth + '%');
+                    element.setAttribute('height', bottomHeight + '%');
+                }
+                break;
+            case 'br': // bottom-right
+                const brWidth = mouseX - x;
+                const brHeight = mouseY - y;
+                if (brWidth > 1 && brHeight > 1) {
+                    element.setAttribute('width', brWidth + '%');
+                    element.setAttribute('height', brHeight + '%');
+                }
+                break;
+            case 'move': // center move
+                // This is handled by the box dragging function
+                break;
+        }
+        
+        // Update box data
+        boxData.x = parseFloat(element.getAttribute('x'));
+        boxData.y = parseFloat(element.getAttribute('y'));
+        boxData.width = parseFloat(element.getAttribute('width'));
+        boxData.height = parseFloat(element.getAttribute('height'));
+        
+        // Update handle positions
+        this.update2DBoxHandles(boxData);
+    }
+    
+    update2DBoxHandles(boxData) {
+        if (!boxData.handles) return;
+        
+        const x = parseFloat(boxData.element.getAttribute('x'));
+        const y = parseFloat(boxData.element.getAttribute('y'));
+        const width = parseFloat(boxData.element.getAttribute('width'));
+        const height = parseFloat(boxData.element.getAttribute('height'));
+        
+        const positions = [
+            { x: x, y: y },                           // top-left
+            { x: x + width, y: y },                   // top-right
+            { x: x, y: y + height },                  // bottom-left
+            { x: x + width, y: y + height },          // bottom-right
+            { x: x + width/2, y: y + height/2 }       // center
+        ];
+        
+        boxData.handles.forEach((handle, index) => {
+            if (handle && positions[index]) {
+                handle.setAttribute('cx', positions[index].x + '%');
+                handle.setAttribute('cy', positions[index].y + '%');
+            }
+        });
     }
     
     update2DBoxCount() {
@@ -831,8 +1179,23 @@ class AnnotationApp {
         
         // Set canvas size to match container
         const rect = canvas.getBoundingClientRect();
-        canvas.width = rect.width;
-        canvas.height = rect.height;
+        
+        // Make sure canvas has actual dimensions
+        if (rect.width === 0 || rect.height === 0) {
+            console.log('⚠️ Canvas has zero dimensions, using parent container');
+            const parent = canvas.parentElement;
+            if (parent) {
+                const parentRect = parent.getBoundingClientRect();
+                canvas.width = parentRect.width;
+                canvas.height = parentRect.height;
+            } else {
+                canvas.width = 480;  // Default fallback
+                canvas.height = 360;
+            }
+        } else {
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        }
         
         console.log('🎨 Canvas size:', canvas.width, 'x', canvas.height);
         console.log('🎨 Canvas rect:', rect);
@@ -889,7 +1252,8 @@ class AnnotationApp {
                     }
                     
                     ctx.fillStyle = color;
-                    ctx.fillRect(Math.floor(canvas_x - 1), Math.floor(canvas_y - 1), 2, 2);
+                    // Draw larger, more visible points
+                    ctx.fillRect(Math.floor(canvas_x - 2), Math.floor(canvas_y - 2), 4, 4);
                     projectedCount++;
                 }
             }
