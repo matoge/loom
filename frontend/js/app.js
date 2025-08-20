@@ -434,6 +434,21 @@ class AnnotationApp {
         `;
         pcOverlayBtn.onclick = () => this.togglePointCloudOverlay();
         
+        // Zoom reset button
+        const zoomResetBtn = document.createElement('button');
+        zoomResetBtn.textContent = '🔍';
+        zoomResetBtn.title = 'Reset Zoom (Wheel=Zoom, MiddleDrag=Pan)';
+        zoomResetBtn.style.cssText = `
+            padding: 4px 8px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #666;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        `;
+        zoomResetBtn.onclick = () => this.resetImageZoom();
+        
         // Box count
         const boxCountText = document.createElement('span');
         boxCountText.id = '2d-box-count-window';
@@ -461,28 +476,45 @@ class AnnotationApp {
         `;
         closeBtn.onclick = () => subWindow.style.display = 'none';
         
-        // Image container
+        // Image container (with zoom/pan support)
         const imageContainer = document.createElement('div');
+        imageContainer.id = 'image-container-2d';
         imageContainer.style.cssText = `
             position: relative;
             width: 100%;
             height: calc(100% - 40px);
             overflow: hidden;
+            cursor: grab;
+        `;
+        
+        // Image viewport (the draggable/zoomable container)
+        const imageViewport = document.createElement('div');
+        imageViewport.id = 'image-viewport-2d';
+        imageViewport.style.cssText = `
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transform-origin: center center;
+            transition: none;
         `;
         
         // Camera image
         const img = document.createElement('img');
+        img.id = 'camera-image-2d';
         img.style.cssText = `
             width: 100%;
             height: 100%;
             object-fit: contain;
             display: block;
             background: #111;
+            pointer-events: none;
         `;
         img.src = this.currentSceneData.camera_image.image_data;
         
         // SVG overlay for 2D annotations
-        const svgOverlay = document.createElement('svg');
+        const svgOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svgOverlay.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        svgOverlay.id = 'svg-annotation-overlay';
         svgOverlay.style.cssText = `
             position: absolute;
             top: 0;
@@ -491,7 +523,10 @@ class AnnotationApp {
             height: 100%;
             pointer-events: all;
             cursor: crosshair;
+            background: rgba(255, 0, 0, 0.05);
         `;
+        
+        console.log('📐 SVG overlay created with id:', svgOverlay.id);
         
         // Canvas for point cloud overlay (initially hidden)
         const pcCanvas = document.createElement('canvas');
@@ -509,20 +544,26 @@ class AnnotationApp {
         // Setup 2D box drawing
         this.setup2DBoxDrawingWindow(svgOverlay, img);
         
+        // Setup zoom and pan controls
+        this.setupImageZoomPan(imageContainer, imageViewport);
+        
         // Make draggable
         this.makeDraggable(subWindow, titleBar);
         
         // Assemble components
         controls.appendChild(pcOverlayBtn);
+        controls.appendChild(zoomResetBtn);
         controls.appendChild(boxCountText);
         controls.appendChild(closeBtn);
         
         titleBar.appendChild(titleText);
         titleBar.appendChild(controls);
         
-        imageContainer.appendChild(img);
-        imageContainer.appendChild(pcCanvas);
-        imageContainer.appendChild(svgOverlay);
+        // Assemble image hierarchy
+        imageViewport.appendChild(img);
+        imageViewport.appendChild(pcCanvas);
+        imageViewport.appendChild(svgOverlay);
+        imageContainer.appendChild(imageViewport);
         
         subWindow.appendChild(titleBar);
         subWindow.appendChild(imageContainer);
@@ -530,19 +571,45 @@ class AnnotationApp {
         document.body.appendChild(subWindow);
         
         console.log('📐 Professional 2D annotation sub-window created');
+        console.log('📐 Window position:', subWindow.style.bottom, subWindow.style.right);
+        console.log('📐 Window dimensions:', subWindow.style.width, 'x', subWindow.style.height);
+        console.log('📐 Window z-index:', subWindow.style.zIndex);
+        
+        // Verify visibility after DOM insertion
+        setTimeout(() => {
+            const bounds = subWindow.getBoundingClientRect();
+            console.log('📐 Window bounds:', bounds);
+            console.log('📐 Window is visible:', bounds.width > 0 && bounds.height > 0);
+            console.log('📐 SVG overlay children:', svgOverlay.children.length);
+        }, 100);
+        
         return subWindow;
     }
     
     setup2DBoxDrawingWindow(svgOverlay, imageElement) {
+        console.log('🎯 Setting up 2D box drawing for sub-window');
+        
         this.image2DBoxes = this.image2DBoxes || [];
         let isDrawing = false;
         let startPoint = null;
         let currentBox = null;
         
+        // Prevent default drag behavior
+        svgOverlay.addEventListener('dragstart', (e) => e.preventDefault());
+        svgOverlay.addEventListener('selectstart', (e) => e.preventDefault());
+        
         svgOverlay.addEventListener('mousedown', (e) => {
+            console.log('📦 SVG mousedown triggered - button:', e.button);
+            if (e.button !== 0) return; // Only left mouse button
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
             const rect = svgOverlay.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * 100; // Percentage
             const y = ((e.clientY - rect.top) / rect.height) * 100;  // Percentage
+            
+            console.log(`📦 Starting box at ${x.toFixed(1)}%, ${y.toFixed(1)}%`);
             
             isDrawing = true;
             startPoint = { x, y };
@@ -555,14 +622,18 @@ class AnnotationApp {
             currentBox.setAttribute('height', '0%');
             currentBox.setAttribute('fill', 'none');
             currentBox.setAttribute('stroke', '#00ff00');
-            currentBox.setAttribute('stroke-width', '2');
+            currentBox.setAttribute('stroke-width', '3'); // Make it more visible
             currentBox.setAttribute('stroke-dasharray', '5,5');
             
+            console.log('📦 SVG rect element created:', currentBox);
             svgOverlay.appendChild(currentBox);
+            console.log('📦 SVG rect added to overlay, children count:', svgOverlay.children.length);
         });
         
         svgOverlay.addEventListener('mousemove', (e) => {
             if (!isDrawing || !currentBox) return;
+            
+            e.preventDefault();
             
             const rect = svgOverlay.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -580,8 +651,14 @@ class AnnotationApp {
         });
         
         svgOverlay.addEventListener('mouseup', (e) => {
-            if (!isDrawing || !currentBox) return;
+            console.log('📦 SVG mouseup - isDrawing:', isDrawing, 'currentBox:', !!currentBox, 'button:', e.button);
+            if (!isDrawing || !currentBox) {
+                console.log('📦 Mouseup ignored - not drawing or no current box');
+                return;
+            }
             
+            e.preventDefault();
+            e.stopPropagation();
             isDrawing = false;
             
             // Get final box dimensions
@@ -592,8 +669,10 @@ class AnnotationApp {
             const width = Math.abs(x - startPoint.x);
             const height = Math.abs(y - startPoint.y);
             
+            console.log(`📦 Final box dimensions: ${width.toFixed(1)}% x ${height.toFixed(1)}%`);
+            
             // Only keep box if it has meaningful size
-            if (width > 1 && height > 1) {
+            if (width > 2 && height > 2) {
                 // Make box solid and add click handler
                 currentBox.setAttribute('stroke', '#00ff00');
                 currentBox.setAttribute('stroke-dasharray', 'none');
@@ -621,15 +700,18 @@ class AnnotationApp {
                     this.select2DBox(boxData);
                 });
                 
-                console.log('📦 Created 2D box:', boxData);
+                console.log('✅ Created 2D box:', boxData);
             } else {
                 // Remove too small boxes
                 svgOverlay.removeChild(currentBox);
+                console.log('❌ Box too small, removed');
             }
             
             currentBox = null;
             startPoint = null;
         });
+        
+        console.log('✅ 2D box drawing setup complete');
     }
     
     select2DBox(boxData) {
@@ -697,12 +779,27 @@ class AnnotationApp {
     }
     
     togglePointCloudOverlay() {
+        console.log('🔴 togglePointCloudOverlay called');
+        
         const canvas = document.getElementById('pc-overlay-canvas');
         const btn = document.querySelector('button[title="Toggle Point Cloud Overlay"]');
         
-        if (!canvas || !btn) return;
+        console.log('🔴 Canvas found:', !!canvas);
+        console.log('🔴 Button found:', !!btn);
+        console.log('🔴 Current scene data:', !!this.currentSceneData);
+        
+        if (!canvas) {
+            console.log('❌ Canvas not found');
+            return;
+        }
+        
+        if (!btn) {
+            console.log('❌ Button not found');
+            return;
+        }
         
         const isVisible = canvas.style.display !== 'none';
+        console.log('🔴 Current visibility:', isVisible);
         
         if (isVisible) {
             canvas.style.display = 'none';
@@ -713,46 +810,313 @@ class AnnotationApp {
             canvas.style.display = 'block';
             btn.textContent = '🔴 PC';
             btn.style.background = '#aa0000';
+            console.log('🔴 Point cloud overlay shown, calling renderPointCloudOverlay...');
             this.renderPointCloudOverlay(canvas);
-            console.log('🔴 Point cloud overlay shown');
         }
     }
     
     renderPointCloudOverlay(canvas) {
+        console.log('🎨 renderPointCloudOverlay called');
+        
         if (!this.currentSceneData || !this.currentSceneData.point_cloud) {
             console.log('⚠️ No point cloud data for overlay');
+            console.log('   - currentSceneData:', !!this.currentSceneData);
+            if (this.currentSceneData) {
+                console.log('   - point_cloud:', !!this.currentSceneData.point_cloud);
+            }
             return;
         }
+        
+        console.log('🎨 Point cloud data available, setting up canvas...');
         
         // Set canvas size to match container
         const rect = canvas.getBoundingClientRect();
         canvas.width = rect.width;
         canvas.height = rect.height;
         
+        console.log('🎨 Canvas size:', canvas.width, 'x', canvas.height);
+        console.log('🎨 Canvas rect:', rect);
+        
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        // Simple point projection (this would normally use camera matrices)
+        // Get camera parameters that match our frustum
+        const cameraParams = this.getCameraProjectionParams(canvas.width, canvas.height);
         const points = this.currentSceneData.point_cloud.points;
         
-        // Simulate camera projection (simplified)
+        console.log('🎨 Point cloud has', points.length, 'points');
+        console.log('🎨 Camera params:', cameraParams);
+        
+        let projectedCount = 0;
+        
+        // Project each 3D point to 2D using proper camera mathematics
         points.forEach(point => {
-            const [x, y, z, intensity] = point;
+            const [x_world, y_world, z_world, intensity] = point;
             
-            // Simple perspective projection
-            const projectedX = (canvas.width / 2) + (x * 20);
-            const projectedY = (canvas.height / 2) - (z * 20);
+            // Transform from world coordinates to camera coordinates
+            // Our camera is at (0, 1.5, 1) looking in +Z direction (which is +X in ISO 8855)
+            const cam_x = x_world - cameraParams.position.x;
+            const cam_y = y_world - cameraParams.position.y; 
+            const cam_z = z_world - cameraParams.position.z;
             
-            // Only render points that are in front of camera and within bounds
-            if (projectedX >= 0 && projectedX < canvas.width && 
-                projectedY >= 0 && projectedY < canvas.height && y > 0) {
+            // Only project points that are in front of the camera
+            if (cam_z > 0.1) { // Near clipping plane
                 
-                ctx.fillStyle = `rgba(0, 255, 255, ${intensity * 0.8})`;
-                ctx.fillRect(projectedX - 1, projectedY - 1, 2, 2);
+                // Project to normalized device coordinates
+                const projected_x = (cameraParams.fx * cam_x) / cam_z + cameraParams.cx;
+                const projected_y = (cameraParams.fy * (-cam_y)) / cam_z + cameraParams.cy; // Flip Y for screen coordinates
+                
+                // Convert to canvas coordinates
+                const canvas_x = (projected_x / cameraParams.image_width) * canvas.width;
+                const canvas_y = (projected_y / cameraParams.image_height) * canvas.height;
+                
+                // Only render points within the image bounds
+                if (canvas_x >= 0 && canvas_x < canvas.width && 
+                    canvas_y >= 0 && canvas_y < canvas.height) {
+                    
+                    // Color based on distance and intensity
+                    const distance = Math.sqrt(cam_x*cam_x + cam_y*cam_y + cam_z*cam_z);
+                    const alpha = Math.min(intensity * 0.8, 0.9) * (1.0 / (distance * 0.1 + 1.0));
+                    
+                    // Different colors for different height ranges
+                    let color;
+                    if (z_world > 2) {
+                        color = `rgba(255, 255, 0, ${alpha})`; // Yellow for high objects
+                    } else if (z_world > 0.5) {
+                        color = `rgba(0, 255, 255, ${alpha})`; // Cyan for mid-height 
+                    } else {
+                        color = `rgba(100, 100, 255, ${alpha})`; // Blue for ground
+                    }
+                    
+                    ctx.fillStyle = color;
+                    ctx.fillRect(Math.floor(canvas_x - 1), Math.floor(canvas_y - 1), 2, 2);
+                    projectedCount++;
+                }
             }
         });
         
-        console.log(`📊 Rendered ${points.length} points on overlay`);
+        console.log(`📊 Projected ${projectedCount}/${points.length} points to 2D overlay`);
+    }
+    
+    setupImageZoomPan(container, viewport) {
+        // Initialize transform state
+        this.imageTransform = {
+            scale: 1.0,
+            translateX: 0,
+            translateY: 0
+        };
+        
+        // Mouse wheel zoom - zoom towards cursor
+        container.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            
+            // Get mouse position relative to the container
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            console.log('🔍 Zoom event - mouse pos:', mouseX.toFixed(1), mouseY.toFixed(1));
+            console.log('🔍 Current transform:', {
+                scale: this.imageTransform.scale.toFixed(2),
+                translateX: this.imageTransform.translateX.toFixed(1),
+                translateY: this.imageTransform.translateY.toFixed(1)
+            });
+            
+            // Zoom factor
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const oldScale = this.imageTransform.scale;
+            const newScale = Math.max(0.1, Math.min(5.0, oldScale * delta));
+            
+            if (oldScale !== newScale) {
+                // Calculate zoom towards mouse position
+                // Formula: new_translate = mouse_pos - (mouse_pos - old_translate) * (new_scale / old_scale)
+                const scaleRatio = newScale / oldScale;
+                
+                this.imageTransform.translateX = mouseX - (mouseX - this.imageTransform.translateX) * scaleRatio;
+                this.imageTransform.translateY = mouseY - (mouseY - this.imageTransform.translateY) * scaleRatio;
+                this.imageTransform.scale = newScale;
+                
+                console.log('🔍 New transform:', {
+                    scale: this.imageTransform.scale.toFixed(2),
+                    translateX: this.imageTransform.translateX.toFixed(1),
+                    translateY: this.imageTransform.translateY.toFixed(1)
+                });
+                
+                this.applyImageTransform(viewport);
+            }
+        });
+        
+        // Middle mouse button pan
+        let isPanning = false;
+        let startPanX = 0;
+        let startPanY = 0;
+        let startTranslateX = 0;
+        let startTranslateY = 0;
+        
+        // Add event listeners to both container and document for better coverage
+        function handleMouseDown(e) {
+            console.log('🖱️ Mouse down - button:', e.button);
+            if (e.button === 1) { // Middle mouse button
+                e.preventDefault();
+                e.stopPropagation();
+                isPanning = true;
+                startPanX = e.clientX;
+                startPanY = e.clientY;
+                startTranslateX = this.imageTransform.translateX;
+                startTranslateY = this.imageTransform.translateY;
+                container.style.cursor = 'grabbing';
+                console.log('🖱️ Started panning mode');
+            }
+        }
+        
+        container.addEventListener('mousedown', handleMouseDown.bind(this));
+        // Also listen on viewport to catch events through SVG
+        viewport.addEventListener('mousedown', handleMouseDown.bind(this));
+        
+        // Use document-level events for mouse move and up to handle cases where
+        // mouse moves outside the container or SVG blocks events
+        function handleMouseMove(e) {
+            if (isPanning) {
+                e.preventDefault();
+                e.stopPropagation();
+                const dx = e.clientX - startPanX;
+                const dy = e.clientY - startPanY;
+                
+                this.imageTransform.translateX = startTranslateX + dx;
+                this.imageTransform.translateY = startTranslateY + dy;
+                
+                this.applyImageTransform(viewport);
+            }
+        }
+        
+        function handleMouseUp(e) {
+            console.log('🖱️ Mouse up - button:', e.button, 'isPanning:', isPanning);
+            if (e.button === 1 && isPanning) {
+                e.preventDefault();
+                e.stopPropagation();
+                isPanning = false;
+                container.style.cursor = 'default';
+                console.log('🖱️ Stopped panning mode');
+            }
+        }
+        
+        document.addEventListener('mousemove', handleMouseMove.bind(this));
+        document.addEventListener('mouseup', handleMouseUp.bind(this));
+        
+        // Prevent context menu on middle click and right click
+        container.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+        
+        // Disable text selection while dragging
+        container.addEventListener('selectstart', (e) => {
+            if (isPanning) e.preventDefault();
+        });
+        
+        console.log('🔍 Image zoom/pan controls setup complete');
+    }
+    
+    applyImageTransform(viewport) {
+        const transform = `translate(${this.imageTransform.translateX}px, ${this.imageTransform.translateY}px) scale(${this.imageTransform.scale})`;
+        
+        // Set transform origin to top-left (0% 0%) for predictable zoom behavior
+        viewport.style.transformOrigin = '0% 0%';
+        viewport.style.transform = transform;
+        
+        console.log('🔧 Applied transform:', transform);
+        
+        // Update point cloud overlay if visible
+        const canvas = document.getElementById('pc-overlay-canvas');
+        if (canvas && canvas.style.display !== 'none') {
+            this.renderPointCloudOverlay(canvas);
+        }
+    }
+    
+    resetImageZoom() {
+        this.imageTransform = {
+            scale: 1.0,
+            translateX: 0,
+            translateY: 0
+        };
+        
+        const viewport = document.getElementById('image-viewport-2d');
+        if (viewport) {
+            this.applyImageTransform(viewport);
+        }
+        
+        console.log('🔍 Image zoom/pan reset');
+    }
+    
+    // Debug function to test 2D functionality
+    debugTest2D() {
+        console.log('🔍 === 2D DEBUG TEST ===');
+        
+        // Check if 2D window exists
+        const window2D = document.getElementById('camera-2d-window');
+        console.log('2D window exists:', !!window2D);
+        
+        if (window2D) {
+            const bounds = window2D.getBoundingClientRect();
+            console.log('2D window bounds:', bounds);
+            console.log('2D window visible:', bounds.width > 0 && bounds.height > 0);
+        }
+        
+        // Check SVG overlay
+        const svg = document.getElementById('svg-annotation-overlay');
+        console.log('SVG overlay exists:', !!svg);
+        
+        if (svg) {
+            console.log('SVG children count:', svg.children.length);
+            const svgBounds = svg.getBoundingClientRect();
+            console.log('SVG bounds:', svgBounds);
+        }
+        
+        // Check point cloud overlay canvas
+        const canvas = document.getElementById('pc-overlay-canvas');
+        console.log('PC overlay canvas exists:', !!canvas);
+        
+        if (canvas) {
+            console.log('Canvas display:', canvas.style.display);
+            console.log('Canvas size:', canvas.width, 'x', canvas.height);
+        }
+        
+        // Check scene data
+        console.log('Current scene data exists:', !!this.currentSceneData);
+        if (this.currentSceneData) {
+            console.log('Scene has camera image:', !!this.currentSceneData.camera_image);
+            console.log('Scene has point cloud:', !!this.currentSceneData.point_cloud);
+            if (this.currentSceneData.point_cloud) {
+                console.log('Point cloud points:', this.currentSceneData.point_cloud.points.length);
+            }
+        }
+        
+        console.log('🔍 === END DEBUG TEST ===');
+    }
+    
+    getCameraProjectionParams(canvasWidth, canvasHeight) {
+        // Match the camera frustum parameters used in createCameraFrustumStructure
+        return {
+            // Camera position (matches frustum position)
+            position: { x: 0, y: 1.5, z: 1 },
+            
+            // Image dimensions (matches our generated camera images)
+            image_width: 800,
+            image_height: 400,
+            
+            // Camera intrinsics (realistic automotive camera)
+            fx: 400,  // Focal length X in pixels
+            fy: 400,  // Focal length Y in pixels  
+            cx: 400,  // Principal point X (image center)
+            cy: 200,  // Principal point Y (image center)
+            
+            // FOV parameters (matches frustum)
+            fov_h: Math.PI * 90 / 180,  // 90° horizontal FOV
+            fov_v: Math.PI * 50 / 180,  // 50° vertical FOV
+            
+            // Clipping planes
+            near: 0.3,
+            far: 8.0
+        };
     }
     
     transitionTo2DMode() {
@@ -1132,10 +1496,10 @@ class AnnotationApp {
         // Check if we're running on localhost or remote server
         const hostname = window.location.hostname;
         if (hostname === 'localhost' || hostname === '127.0.0.1') {
-            return 'http://localhost:8001';
+            return 'http://localhost:5001';
         } else {
             // For remote access, use the server's actual IP
-            return 'http://192.168.1.9:8001';
+            return 'http://192.168.1.9:5001';
         }
     }
     
@@ -1247,4 +1611,14 @@ class AnnotationApp {
 // Initialize the app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     window.annotationApp = new AnnotationApp();
+    
+    // Expose debug functions globally for testing
+    window.debugTest2D = () => window.annotationApp.debugTest2D();
+    window.testTogglePC = () => window.annotationApp.togglePointCloudOverlay();
+    window.testToggle2D = () => window.annotationApp.toggle2DImageOverlay();
+    
+    console.log('🔧 Debug functions available:');
+    console.log('  - debugTest2D() - comprehensive 2D debugging');
+    console.log('  - testTogglePC() - toggle point cloud overlay');
+    console.log('  - testToggle2D() - toggle 2D annotation window');
 });

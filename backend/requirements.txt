@@ -1,7 +1,13 @@
-flask==3.0.0
-flask-cors==4.0.0
-numpy==1.24.3
-pandas==2.0.3
-pyarrow==13.0.0
-pyyaml==6.0.1
-gunicorn==21.2.0
+Flask>=3.0.0
+flask-cors>=4.0.0
+numpy>=1.24.0
+Pillow>=10.0.0
+pyarrow>=13.0.0
+
+# Optional dependencies for enhanced functionality
+# scipy>=1.10.0  # For advanced point cloud operations
+# opencv-python>=4.7.0  # For image processing
+# open3d>=0.17.0  # For point cloud file formats (PLY, PCD)
+# pandas>=2.0.0  # For data manipulation
+# pyyaml>=6.0.0  # For YAML configuration files
+# gunicorn>=21.0.0  # For production deployment
